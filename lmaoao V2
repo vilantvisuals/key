@@ -1,0 +1,3656 @@
+local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
+local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+
+local Window = Library:CreateWindow({
+
+    Title = 'Vilant Exploit V2  |  discord.gg/VfmXpbgC9E',
+    Center = true,
+    AutoShow = true,
+    TabPadding = 8,
+    MenuFadeTime = 0.2
+})
+
+local Tabs = {
+    Main = Window:AddTab('Main'),
+    Visuals = Window:AddTab('Visuals'),
+    Player = Window:AddTab('Player'),
+}
+
+LeftGroupBox = Tabs.Main:AddLeftGroupbox('Aimbot')
+
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local UserInputService = game:GetService("UserInputService")
+    local Camera = workspace.CurrentCamera
+    local Workspace = game:GetService("Workspace")
+    
+    local LocalPlayer = Players.LocalPlayer
+    
+    local cursorLocked = false
+    local targetHead = nil
+    local targetPlayer = nil
+    local previewHighlight = nil
+    local lockedHighlight = nil
+    local predictionLevel = 0 -- Default prediction level, can be changed (higher value = more prediction)
+    local currentKeybind = Enum.KeyCode.C
+    local previewColor = Color3.fromRGB(0, 0, 255) -- Default preview color
+    local lockedHighlightColor = Color3.fromRGB(255, 0, 0) -- Default locked highlight color
+    local smoothness = 0 -- Default smoothness value
+    local highlightsEnabled = false -- Default value for highlights toggle
+    
+    local ragelock = false  -- Default value for ragelock
+    local orbitActive = false  -- Flag for orbit feature
+    local orbitSpeed = 10 -- Orbit speed
+    local radius = 8 -- Orbit size
+    local rotation = CFrame.Angles(0, 0, 0) -- Rotation angles
+    
+    if _G.aimlock == nil then
+        _G.aimlock = false  -- Default value if not previously set
+    end
+    
+    local function IsPlayerKnockedOrGrabbed(player)
+        local character = player.Character
+        if character then
+            local bodyEffects = character:FindFirstChild("BodyEffects")
+            local grabbingConstraint = character:FindFirstChild("GRABBING_CONSTRAINT")
+            if bodyEffects and bodyEffects:FindFirstChild("K.O") and bodyEffects["K.O"].Value or grabbingConstraint then
+                return true
+            end
+        end
+        return false
+    end
+    
+    -- Function to calculate the predicted position based on velocity
+    local function GetPredictedPosition(player)
+        local character = player.Character
+        if character then
+            local humanoid = character:FindFirstChild("Humanoid")
+            local head = character:FindFirstChild("Head")
+            if humanoid and head then
+                local velocity = humanoid.RootPart.AssemblyLinearVelocity
+                return head.Position + velocity * predictionLevel
+            end
+        end
+        return nil
+    end
+    
+    local function FindClosestPlayerHead()
+        local closestPlayer = nil
+        local closestDistance = math.huge
+        local mousePosition = Vector2.new(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+    
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+                local character = player.Character
+                local humanoid = character:FindFirstChild("Humanoid")
+    
+                if humanoid and humanoid.Health > 0 then
+                    if IsPlayerKnockedOrGrabbed(player) then continue end  -- Skip locked/knocked/grabbed players
+                    local head = character.Head
+                    local predictedHeadPosition = GetPredictedPosition(player) or head.Position
+                    local screenPoint = Camera:WorldToScreenPoint(predictedHeadPosition)
+                    local distance = (mousePosition - Vector2.new(screenPoint.X, screenPoint.Y)).Magnitude
+                    local playerDistance = (Camera.CFrame.Position - predictedHeadPosition).Magnitude
+    
+                    local ray = Ray.new(Camera.CFrame.Position, predictedHeadPosition - Camera.CFrame.Position)
+                    local hitPart, hitPosition = Workspace:FindPartOnRay(ray, LocalPlayer.Character)
+    
+                    if playerDistance <= 100 or (not hitPart or hitPart.Parent == character) then
+                        if distance < closestDistance then
+                            closestDistance = distance
+                            closestPlayer = player
+                        end
+                    end
+                end
+            end
+        end
+    
+        if closestPlayer then
+            return closestPlayer.Character.Head, closestPlayer
+        end
+        return nil, nil
+    end
+    
+    local function AddPreviewHighlight(player)
+        if not highlightsEnabled then return end -- Skip if highlights are disabled
+    
+        if previewHighlight and previewHighlight.Parent == player.Character then
+            previewHighlight.FillColor = previewColor
+            return
+        end
+    
+        if previewHighlight then
+            previewHighlight:Destroy()
+        end
+    
+        if player and player.Character then
+            previewHighlight = Instance.new("Highlight")
+            previewHighlight.Parent = player.Character
+            previewHighlight.FillTransparency = 0.5
+            previewHighlight.FillColor = previewColor
+        end
+    end
+    
+    local function AddLockedHighlight(player)
+        if not highlightsEnabled then return end -- Skip if highlights are disabled
+    
+        if lockedHighlight and lockedHighlight.Parent == player.Character then
+            lockedHighlight.FillColor = lockedHighlightColor
+            return
+        end
+    
+        if lockedHighlight then
+            lockedHighlight:Destroy()
+        end
+    
+        if player and player.Character then
+            lockedHighlight = Instance.new("Highlight")
+            lockedHighlight.Parent = player.Character
+            lockedHighlight.FillTransparency = 0.5
+            lockedHighlight.FillColor = lockedHighlightColor
+        end
+    end
+    
+    local function LockCursorToHead()
+        targetHead, targetPlayer = FindClosestPlayerHead()
+        if targetHead then
+            AddLockedHighlight(targetPlayer)  -- Add highlight to locked player
+            if previewHighlight then previewHighlight:Destroy() end  -- Destroy preview highlight if it exists
+            UserInputService.MouseIconEnabled = false
+        end
+    end
+    
+    local function UnlockCursor()
+        UserInputService.MouseIconEnabled = true
+        targetHead = nil
+        targetPlayer = nil
+        if lockedHighlight then lockedHighlight:Destroy() end
+    end
+    
+    local function ActivateOrbit(player)
+        if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            targetPlayer = player
+        end
+    end
+    
+    -- Function to deactivate orbiting
+    local function DeactivateOrbit()
+        targetPlayer = nil
+    end
+    
+    -- Function to handle automatic targeting for RageLock
+    local function HandleRageLock()
+        -- Ensure RageLock only locks onto the target if it's valid
+        if ragelock then
+            -- Check if targetPlayer is invalid or knocked
+            if targetPlayer and IsPlayerKnockedOrGrabbed(targetPlayer) then
+                -- If the locked target is knocked or grabbed, unlock and search for the next target
+                cursorLocked = false
+                UnlockCursor()
+                DeactivateOrbit()
+                print("[RageLock] Target is knocked/grabbed, unlocking and searching for next target.")
+                targetHead, targetPlayer = FindClosestPlayerHead()
+                if targetPlayer then
+                    cursorLocked = true
+                    LockCursorToHead()
+                    AddLockedHighlight(targetPlayer)  -- Add highlight to new target
+                end
+                return
+            end
+    
+            -- If no valid target is locked, search for a new one
+            if not targetPlayer then
+                targetHead, targetPlayer = FindClosestPlayerHead()
+                if targetPlayer then
+                    cursorLocked = true
+                    LockCursorToHead()
+                    AddLockedHighlight(targetPlayer)  -- Add highlight to new target
+                end
+            end
+        end
+    end
+    
+    -- Orbit update loop (only runs when orbit toggle is true)
+    RunService.Stepped:Connect(function(_, dt)
+        if orbitActive then
+            -- Only update orbit if the toggle is true and the player is locked onto a valid target
+            if cursorLocked and targetPlayer then
+                -- Only update orbit if the target is locked (Aimlock or RageLock)
+                local targetHumanoidRootPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if targetHumanoidRootPart then
+                    local rot = tick() * orbitSpeed
+                    local lpr = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if lpr then
+                        -- Orbit calculation (only orbits if locked onto target)
+                        lpr.CFrame = CFrame.new(
+                            targetHumanoidRootPart.Position + Vector3.new(math.sin(rot) * radius, 0, math.cos(rot) * radius)
+                        )
+                    end
+                end
+            end
+        end
+    
+        -- Update loop to continuously follow the locked target for aimlock
+        if cursorLocked and _G.aimlock and targetHead then
+    
+            -- Check if the locked player is knocked or grabbed and unlock if necessary
+            if IsPlayerKnockedOrGrabbed(targetPlayer) then
+                cursorLocked = false
+                UnlockCursor()
+                DeactivateOrbit()
+                print("[Auto Unlock] Target player is knocked or grabbed, unlocking cursor.")
+            else
+                        -- Proceed with the normal aimlock and orbit
+        local predictedHeadPosition = GetPredictedPosition(targetPlayer) or targetHead.Position
+        -- Smoothly interpolate the camera's CFrame
+        local alpha = 1 - smoothness
+        alpha = math.max(alpha, 0.01)  -- Ensure alpha is never 0
+        Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, predictedHeadPosition), alpha)
+            end
+        elseif not cursorLocked and _G.aimlock then
+            local closestHead, closestPlayer = FindClosestPlayerHead()
+            if closestPlayer ~= targetPlayer then
+                AddPreviewHighlight(closestPlayer)
+            end
+        end
+    end)
+    
+    -- Handle key press (C) for locking the cursor
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == currentKeybind then
+            if _G.aimlock then
+                cursorLocked = not cursorLocked
+                if cursorLocked then
+                    LockCursorToHead()
+                    if orbitActive then
+                        ActivateOrbit(targetPlayer)  -- Activate orbit when locking onto a player and orbiting is enabled
+                    end
+                else
+                    UnlockCursor()
+                    DeactivateOrbit()  -- Deactivate orbit when unlocking
+                end
+            end
+        end
+    end)
+    
+    -- UI Controls for setting various values like keybinds and highlight colors
+    LeftGroupBox:AddToggle('Aimbot', {
+        Text = 'Enabled',
+        Default = false,
+        Tooltip = 'Locks your aim onto players heads',
+        Callback = function(Value)
+            _G.aimlock = Value
+            print('[cb] Aimbot changed to:', Value)
+            if _G.aimlock then
+                cursorLocked = false  -- Ensure cursor is not locked when aimlock is turned on
+            end
+        end
+    })
+    
+    LeftGroupBox:AddToggle('OrbitFeature', {
+        Text = 'Target Strafe',
+        Default = false,
+        Tooltip = 'Toggle to start strafing around the player you lock onto.',
+        Callback = function(value)
+            orbitActive = value  -- Directly set orbitActive based on toggle state
+            if orbitActive and cursorLocked then
+                ActivateOrbit(targetPlayer) -- Activate orbit only if locked onto a player
+            else
+                DeactivateOrbit()  -- Deactivate orbit when the toggle is off
+            end
+        end
+    })
+    
+    -- Add Toggle for Highlights
+    LeftGroupBox:AddToggle('HighlightsToggle', {
+        Text = 'Chams',
+        Default = highlightsEnabled,
+        Tooltip = 'Toggle to enable or disable Chams',
+        Callback = function(Value)
+            highlightsEnabled = Value
+            print('[cb] Chams toggled:', Value)
+            if not Value then
+                -- Destroy highlights if they exist
+                if previewHighlight then
+                    previewHighlight:Destroy()
+                    previewHighlight = nil
+                end
+                if lockedHighlight then
+                    lockedHighlight:Destroy()
+                    lockedHighlight = nil
+                end
+            end
+        end
+    })
+
+LeftGroupBox:AddToggle('MyToggle', {
+        Text = 'Rapid Fire',
+        Default = false, -- Default value (true / false)
+        Tooltip = 'Rapid Fire is better for some', -- Information shown when you hover over the toggle
+    
+        Callback = function(Value)
+    
+            -- Ensure script state is toggled correctly on each execution
+            if _G.gunActivation == nil then
+                _G.gunActivation = false  -- Default value if not previously set
+            end
+    
+            -- Toggle script state
+            _G.gunActivation = not _G.gunActivation
+    
+            -- Store frequently used Enum values in variables
+            local UserInputType = Enum.UserInputType
+            local MouseButton1 = UserInputType.MouseButton1
+    
+            if _G.gunActivation then
+                local player = game.Players.LocalPlayer
+                local userInputService = game:GetService("UserInputService")
+                local runService = game:GetService("RunService")
+                local isActive = false  -- Tracks whether the gun activation is enabled or not
+    
+                -- Function to continuously activate the held item (gun) at the fastest rate possible
+                local function continuouslyActivateHeldItem()
+                    while _G.gunActivation and runService.Heartbeat:Wait() do
+                        if isActive then
+                            local character = player.Character
+                            if character then
+                                local gunTool = character:FindFirstChildOfClass("Tool")
+                                if gunTool then
+                                    gunTool:Activate()
+                                end
+                            end
+                        end
+                    end
+                end
+    
+                local function onMouseClick(input, gameProcessedEvent)
+                    if gameProcessedEvent then return end
+    
+                    if input.UserInputType == MouseButton1 then
+                        isActive = true
+                    end
+                end
+    
+                local function onMouseRelease(input, gameProcessedEvent)
+                    if gameProcessedEvent then return end
+    
+                    if input.UserInputType == MouseButton1 then
+                        isActive = false
+                    end
+                end
+    
+                _G.mouseClickConnection = userInputService.InputBegan:Connect(onMouseClick)
+                _G.mouseReleaseConnection = userInputService.InputEnded:Connect(onMouseRelease)
+                spawn(continuouslyActivateHeldItem)
+            else
+                if _G.mouseClickConnection then
+                    _G.mouseClickConnection:Disconnect()
+                    _G.mouseClickConnection = nil
+                end
+                if _G.mouseReleaseConnection then
+                    _G.mouseReleaseConnection:Disconnect()
+                    _G.mouseReleaseConnection = nil
+                end
+            end
+        end
+    })   
+    
+    LeftGroupBox:AddLabel('Keybind'):AddKeyPicker('KeyPicker', {
+        Default = 'C',
+        SyncToggleState = false,
+        Mode = 'Toggle',
+        Text = 'Aimbot',
+        ChangedCallback = function(New)
+            print('[cb] Keybind changed!', New)
+            currentKeybind = New
+        end
+    })
+    
+    LeftGroupBox:AddLabel('Preview Color'):AddColorPicker('PreviewColorPicker', {
+        Default = previewColor,
+        Title = 'Preview Color',
+        Transparency = 0,
+        Callback = function(Value)
+            print('[cb] Preview Color changed!', Value)
+            previewColor = Value
+            if previewHighlight then
+                previewHighlight.FillColor = Value
+            end
+        end
+    })
+    
+    LeftGroupBox:AddLabel('Locked Cham Color'):AddColorPicker('LockedColorPicker', {
+        Default = lockedHighlightColor,
+        Title = 'Locked Cham Color',
+        Transparency = 0,
+        Callback = function(Value)
+            print('[cb] Locked Cham Color changed!', Value)
+            lockedHighlightColor = Value
+            if lockedHighlight then
+                lockedHighlight.FillColor = Value
+            end
+        end
+    }) 
+    
+    LeftGroupBox:AddSlider('SmoothnessSlider', {
+        Text = 'Smoothness',
+        Default = smoothness,
+        Min = 0,
+        Max = 1,
+        Rounding = 2,
+        Callback = function(Value)
+            print('[cb] Smoothness changed!', Value)
+            smoothness = Value
+        end
+    })
+    
+    LeftGroupBox:AddSlider('Strafe Speed', {
+        Text = 'Strafe Speed',
+        Default = orbitSpeed,
+        Min = 0,
+        Max = 100,
+        Rounding = 1,
+        Callback = function(Value)
+            print('[cb] Orbit Speed changed!', Value)
+            orbitSpeed = Value
+        end
+    })
+    
+    LeftGroupBox:AddSlider('PredictionSlider', {
+        Text = 'Prediction',
+        Default = predictionLevel,
+        Min = 0,
+        Max = 1,
+        Rounding = 1,
+        Callback = function(Value)
+            print('[cb] Prediction changed!', Value)
+            predictionLevel = Value
+        end
+    })
+
+LeftGroupBox = Tabs.Main:AddLeftGroupbox('Triggerbot')
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local lp = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait() and Players.LocalPlayer
+local mouse = lp:GetMouse()
+
+local EnumKeyCode = Enum.KeyCode -- Store Enum values for reuse
+local EnumUserInputType = Enum.UserInputType
+
+local Script = {
+    Functions = {},
+    Table = {
+        Start = {
+            TriggerBot = {
+                Keybind = "Z", -- Default keybind, can be changed via UI
+                Delay = 0.1, -- Default delay, can be changed via UI
+                Blacklisted = {} -- Add blacklisted tool names here
+            }
+        }
+    },
+    Connections = {}
+}
+
+-- Use Object Pooling for frequently accessed properties like BodyEffects
+Script.Functions.isDead = function(player)
+    local character = player.Character
+    if not character then return false end
+
+    local bodyEffects = character:FindFirstChild("BodyEffects")
+    if not bodyEffects then return false end
+
+    local ko = bodyEffects:FindFirstChild("K.O") or bodyEffects:FindFirstChild("KO")
+    return ko and ko.Value or false
+end
+
+Script.Functions.getTarget = function(instance)
+    if not instance then return false end
+
+    for _, player in next, Players:GetPlayers() do
+        if player.Character and (instance == player.Character or instance:IsDescendantOf(player.Character)) then
+            if not Script.Functions.isDead(player) then
+                return player
+            end
+        end
+    end
+
+    return false
+end
+
+Script.Functions.isToolBlacklisted = function(tool)
+    for _, toolName in ipairs(Script.Table.Start.TriggerBot.Blacklisted) do
+        if tool.Name == toolName then
+            return true
+        end
+    end
+    return false
+end
+
+-- Flag to toggle triggerbot state
+local JAIROUGH = false
+local hotkeyEnabled = false -- Flag to control if the hotkey is enabled or not
+
+-- Update delay when slider is changed
+Script.Functions.updateDelay = function(Value)
+    Script.Table.Start.TriggerBot.Delay = Value
+end
+
+-- Toggle triggerbot state on keypress, but only if hotkey is enabled
+Script.Functions.onKeyPress = function(input, gameProcessed)
+    if gameProcessed then return end
+
+    -- Only allow the hotkey to toggle triggerbot if the hotkey is enabled
+    if hotkeyEnabled and input.UserInputType == EnumUserInputType.Keyboard and input.KeyCode == EnumKeyCode[Script.Table.Start.TriggerBot.Keybind] then
+        JAIROUGH = not JAIROUGH
+    end
+end
+
+-- Keybind handler to change keybind via UI
+Script.Functions.updateKeybind = function(NewKey)
+    Script.Table.Start.TriggerBot.Keybind = NewKey.Name
+    print('[cb] Keybind changed!', NewKey.Name)
+end
+
+UserInputService.InputBegan:Connect(Script.Functions.onKeyPress)
+
+-- TriggerBot activation logic
+Script.Functions.triggerBot = function()
+    local con
+    con = RunService.Heartbeat:Connect(function()
+        if JAIROUGH then
+            local target = mouse.Target
+            if target and Script.Functions.getTarget(target) then
+                if lp.Character then
+                    local tool = lp.Character:FindFirstChildWhichIsA('Tool')
+                    if tool and not Script.Functions.isToolBlacklisted(tool) then
+                        task.wait(Script.Table.Start.TriggerBot.Delay)
+                        tool:Activate()
+                    end
+                end
+            end
+        end
+    end)
+
+    Script.Connections.triggerBot = con
+end
+
+Script.Functions.triggerBot()
+
+-- Disable function to disconnect triggerbot and cleanup
+getgenv().disable = function()
+    getgenv().disable = nil
+    if Script.Connections.triggerBot then
+        Script.Connections.triggerBot:Disconnect()
+    end
+end
+
+-- UI Integration
+LeftGroupBox:AddToggle('MyToggle', {
+    Text = 'Enable Triggerbot',
+    Default = false, -- Default value (true / false)
+    Tooltip = 'Enable or Disable the hotkey for TriggerBot', -- Information shown when you hover over the toggle
+    Callback = function(Value)
+        -- Enable or disable hotkey based on toggle state
+        hotkeyEnabled = Value
+        
+        -- If hotkey is disabled, immediately disable the TriggerBot as well
+        if not hotkeyEnabled then
+            JAIROUGH = false
+        end
+    end
+})
+
+LeftGroupBox:AddLabel('Keybind'):AddKeyPicker('KeyPicker', {
+    Default = Script.Table.Start.TriggerBot.Keybind, -- Default keybind value
+    SyncToggleState = false, -- Keybind is independent of toggle state
+    Mode = 'Toggle', -- Modes: Always, Toggle, Hold
+    Text = 'Keybind', -- Text to display in the keybind menu
+    NoUI = false, -- Set to true if you want to hide from the Keybind menu,
+    ChangedCallback = function(New)
+        Script.Functions.updateKeybind(New)
+    end
+})
+
+LeftGroupBox:AddSlider('MySlider', {
+    Text = 'Delay',
+    Default = Script.Table.Start.TriggerBot.Delay, -- Default delay value
+    Min = 0,
+    Max = 1,
+    Rounding = 3,
+    Compact = false,
+    Callback = function(Value)
+        Script.Functions.updateDelay(Value)
+    end
+})
+
+LeftGroupBox = Tabs.Main:AddLeftGroupbox('Shoot Gun')
+
+getgenv().TracerEnabled = true
+getgenv().AutoShootEnabled = true
+getgenv().shootCooldown = 0.1
+getgenv().ScriptEnabled = false
+getgenv().LockKey = Enum.KeyCode.T
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Camera = game.Workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local MainEvent = ReplicatedStorage:FindFirstChild("MainEvent")
+local selectedPlayer = nil
+local lockedPlayer = nil
+
+local tracer = Drawing.new("Line")
+tracer.Thickness = 2
+tracer.Visible = false
+tracer.Color = Color3.fromRGB(128, 0, 128)
+
+if not MainEvent then
+    return
+end
+
+local function isKnocked(player)
+    if player and player.Character then
+        local KO = player.Character:FindFirstChild("BodyEffects") and player.Character.BodyEffects:FindFirstChild("K.O")
+        return KO and KO.Value == true
+    end
+    return false
+end
+
+local function getClosestPlayerToMouse()
+    local closestPlayer = nil
+    local shortestDistance = math.huge
+    local mousePos = UserInputService:GetMouseLocation()
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") and not isKnocked(player) then
+            local head = player.Character.Head
+            local headScreenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+
+            if onScreen then
+                local distance = (Vector2.new(headScreenPos.X, headScreenPos.Y) - mousePos).Magnitude
+                if distance < shortestDistance then
+                    closestPlayer = player
+                    shortestDistance = distance
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+local function updateTracer()
+    if getgenv().TracerEnabled and getgenv().ScriptEnabled then
+        local targetPlayer = lockedPlayer or getClosestPlayerToMouse()
+
+        if targetPlayer then
+            local head = targetPlayer.Character and targetPlayer.Character:FindFirstChild("Head")
+            if head then
+                local headScreenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+
+                if onScreen then
+                    selectedPlayer = targetPlayer
+                    tracer.Visible = true
+                    tracer.To = Vector2.new(headScreenPos.X, headScreenPos.Y)
+                    tracer.From = UserInputService:GetMouseLocation()
+                end
+            end
+        else
+            tracer.Visible = false
+        end
+    end
+end
+
+local function shoot()
+    if lockedPlayer and lockedPlayer.Character and not isKnocked(lockedPlayer) and getgenv().ScriptEnabled then
+        local targetHead = lockedPlayer.Character:FindFirstChild("Head")
+        local Tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+
+        if Tool and Tool:FindFirstChild("Handle") and targetHead then
+            MainEvent:FireServer(
+                "ShootGun",
+                Tool.Handle,
+                Tool.Handle.Position,
+                targetHead.Position,
+                targetHead,
+                Vector3.new(0, 0, 0)
+            )
+        end
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == getgenv().LockKey and not gameProcessed then
+        if getgenv().ScriptEnabled then
+            if lockedPlayer then
+                lockedPlayer = nil
+            else
+                lockedPlayer = getClosestPlayerToMouse()
+            end
+        end
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if getgenv().ScriptEnabled then
+        updateTracer()
+
+        if lockedPlayer then
+            shoot()
+        end
+    else
+        tracer.Visible = false
+    end
+end)
+
+LeftGroupBox:AddToggle('ScriptToggle', {
+    Text = 'Toggle Shoot Gun',
+    Default = false,
+
+    Callback = function(Value)
+        if Value then
+            getgenv().ScriptEnabled = true
+        else
+            getgenv().ScriptEnabled = false
+            tracer.Visible = false
+        end
+    end
+})
+
+LeftGroupBox:AddLabel('Keybind'):AddKeyPicker('KeyPicker', {
+    Default = 'T',
+    SyncToggleState = false,
+    Mode = 'Toggle',
+    Text = 'Shoot Gun Keybind',
+    NoUI = false,
+
+    Callback = function(Value)
+    end,
+
+    ChangedCallback = function(New)
+        getgenv().LockKey = New
+    end
+})
+
+LeftGroupBox = Tabs.Main:AddLeftGroupbox('Kill Aura')
+
+LeftGroupBox:AddToggle('MyToggle', {
+    Text = 'Toggle Kill Aura',
+    Default = false,
+    Tooltip = 'Enables The Kill Aura Feature',
+    Callback = function(Value)
+        if Value then
+        player = game:GetService("Players").LocalPlayer
+        runService = game:GetService("RunService")
+        workspace = game:GetService("Workspace")
+
+        range = 100
+        killAuraEnabled = true
+
+        local lastDamagedPlayer = nil
+
+        function isGunEquipped()
+            local character = player.Character
+            if character then
+                local tool = character:FindFirstChildWhichIsA("Tool")
+                return tool and tool:FindFirstChild("Handle") ~= nil
+            end
+            return false
+        end
+
+        function isTargetValid(targetCharacter)
+            if targetCharacter then
+                local bodyEffects = targetCharacter:FindFirstChild("BodyEffects")
+                local KOd = bodyEffects and bodyEffects:FindFirstChild("K.O") and bodyEffects["K.O"].Value
+                local Grabbed = targetCharacter:FindFirstChild("GRABBING_CONSTRAINT") ~= nil
+                return not KOd and not Grabbed
+            end
+            return false
+        end
+
+        function getNearestPlayer()
+            local character = player.Character
+            local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+            local nearestPlayer = nil
+            local shortestDistance = range
+
+            if rootPart then
+                for _, plr in pairs(game:GetService("Players"):GetPlayers()) do
+                    if plr ~= player and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and isTargetValid(plr.Character) then
+                        local targetRootPart = plr.Character:FindFirstChild("HumanoidRootPart")
+                        local distance = (targetRootPart.Position - rootPart.Position).Magnitude
+
+                        if distance <= shortestDistance then
+                            nearestPlayer = plr
+                            shortestDistance = distance
+                        end
+                    end
+                end
+            end
+            return nearestPlayer
+        end
+
+        function shootNearestPlayer()
+            if not killAuraEnabled or not isGunEquipped() then
+                return
+            end
+
+            local character = player.Character
+            local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+            local tool = character and character:FindFirstChildWhichIsA("Tool") or player.Backpack:FindFirstChildWhichIsA("Tool")
+            local targetPlayer = getNearestPlayer()
+
+            if tool and tool:FindFirstChild("Handle") and rootPart and targetPlayer and targetPlayer.Character then
+                local targetHead = targetPlayer.Character:FindFirstChild("Head")
+                if targetHead then
+                    local direction = (targetHead.Position - rootPart.Position).unit
+                    game:GetService("ReplicatedStorage"):WaitForChild("MainEvent"):FireServer("ShootGun", tool.Handle, rootPart.Position, targetHead.Position, targetHead, direction)
+                end
+            end
+        end
+
+        runService.Heartbeat:Connect(function()
+            if killAuraEnabled then
+                shootNearestPlayer()
+            end
+        end)  
+        else
+            killAuraEnabled = false
+        end
+    end
+})
+
+local HBE = Tabs.Main:AddRightGroupbox('Hitbox Expander')
+
+local size = 10
+local hitboxColor = Color3.new(0, 1, 1)
+local visualizeHitbox = false
+local hitboxExpanderEnabled = false
+local Client = game.Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+HBE:AddToggle('HitboxExpanderToggle', {
+    Text = 'Enabled',
+    Default = false,
+    Callback = function(state)
+        hitboxExpanderEnabled = state
+        if not state then
+            for _, Player in pairs(Players:GetPlayers()) do
+                if Player ~= Client and Player.Character then
+                    resetCharacter(Player.Character)
+                end
+            end
+        end
+    end,
+}):AddKeyPicker("FlightKeybindPicker", {
+    Default = "L",
+    Text = "Hitbox",
+    Mode = "Toggle",
+    Callback = function(state)
+        if UserInputService:GetFocusedTextBox() then return end
+        hitboxExpanderEnabled = state
+        if not state then
+            for _, Player in pairs(Players:GetPlayers()) do
+                if Player ~= Client and Player.Character then
+                    resetCharacter(Player.Character)
+                end
+            end
+        end
+    end
+})
+
+HBE:AddSlider('HitboxSizeSlider', {
+    Text = 'Hitbox Size',
+    Default = 10,
+    Min = 10,
+    Max = 50,
+    Rounding = 0,
+    Callback = function(value)
+        size = value
+    end,
+})
+
+HBE:AddToggle('VisualizerToggle', {
+    Text = 'Visualize',
+    Default = false,
+    Callback = function(state)
+        visualizeHitbox = state
+        if not state then
+            for _, Player in pairs(Players:GetPlayers()) do
+                if Player ~= Client and Player.Character then
+                    removeVisuals(Player.Character)
+                end
+            end
+        end
+    end,
+}):AddColorPicker('HitboxColorPicker', {
+    Text = 'Hitbox Color',
+    Default = Color3.new(0, 1, 1),
+    Callback = function(color)
+        hitboxColor = color
+    end,
+})
+
+local function removeVisuals(Character)
+    if not Character then return end
+    local HRP = Character:FindFirstChild("HumanoidRootPart")
+    if HRP then
+        local outline = HRP:FindFirstChild("HitboxOutline")
+        if outline then outline:Destroy() end
+        local glow = HRP:FindFirstChild("HitboxGlow")
+        if glow then glow:Destroy() end
+    end
+end
+
+local function resetCharacter(Character)
+    if not Character then return end
+    local HRP = Character:FindFirstChild("HumanoidRootPart")
+    if HRP then
+        -- Reset HRP size to default (2, 1, 2)
+        HRP.Size = Vector3.new(2, 1, 2)
+        HRP.Transparency = 1
+        HRP.CanCollide = true
+        removeVisuals(Character)
+    end
+end
+
+local function handleCharacter(Character)
+    if not Character or not hitboxExpanderEnabled then
+        resetCharacter(Character)
+        return
+    end
+    local HRP = Character:FindFirstChild("HumanoidRootPart") or Character:WaitForChild("HumanoidRootPart", 5)
+    if not HRP then return end
+
+    HRP.Size = Vector3.new(size, size, size)
+    HRP.Transparency = 1
+    HRP.CanCollide = false
+
+    if visualizeHitbox then
+        local outline = HRP:FindFirstChild("HitboxOutline")
+        if not outline then
+            outline = Instance.new("BoxHandleAdornment")
+            outline.Name = "HitboxOutline"
+            outline.Adornee = HRP
+            outline.Size = HRP.Size
+            outline.Transparency = 0.8
+            outline.ZIndex = 10
+            outline.AlwaysOnTop = true
+            outline.Color3 = hitboxColor
+            outline.Parent = HRP
+
+            local glow = Instance.new("BoxHandleAdornment")
+            glow.Name = "HitboxGlow"
+            glow.Adornee = HRP
+            glow.Size = HRP.Size + Vector3.new(0.1, 0.1, 0.1)
+            glow.Transparency = 0.9
+            glow.ZIndex = 9
+            glow.AlwaysOnTop = true
+            glow.Color3 = hitboxColor
+            glow.Parent = HRP
+        else
+            outline.Size = HRP.Size
+            outline.Color3 = hitboxColor
+            local glow = HRP:FindFirstChild("HitboxGlow")
+            if glow then
+                glow.Size = HRP.Size + Vector3.new(0.1, 0.1, 0.1)
+                glow.Color3 = hitboxColor
+            end
+        end
+    else
+        removeVisuals(Character)
+    end
+end
+
+local function handlePlayer(Player)
+    if Player == Client then return end
+    Player.CharacterAdded:Connect(function(Character)
+        Character:WaitForChild("HumanoidRootPart")
+        handleCharacter(Character)
+    end)
+    if Player.Character then
+        handleCharacter(Player.Character)
+    end
+end
+
+for _, Player in pairs(Players:GetPlayers()) do
+    handlePlayer(Player)
+end
+
+Players.PlayerAdded:Connect(handlePlayer)
+
+RunService.Heartbeat:Connect(function()
+    if not hitboxExpanderEnabled then
+        for _, Player in pairs(Players:GetPlayers()) do
+            if Player ~= Client and Player.Character then
+                resetCharacter(Player.Character)
+            end
+        end
+        return
+    end
+    for _, Player in pairs(Players:GetPlayers()) do
+        if Player ~= Client and Player.Character then
+            handleCharacter(Player.Character)
+        end
+    end
+end)
+
+local CamLockBox = Tabs.Main:AddRightGroupbox('Pin Camlock')
+
+local camLockEnabled = false
+local camLockTarget = nil
+local smoothness = 1
+
+CamLockBox:AddToggle('CamLockToggle', {
+    Text = 'CamLock',
+    Default = false,
+    Callback = function(state)
+        camLockEnabled = state
+        if not state then
+            camLockTarget = nil
+        end
+    end,
+}):AddKeyPicker('CamLockKeybind', {
+    Default = 'Q',
+    Text = 'CamLock',
+    Mode = 'Toggle',
+    Callback = function()
+        if UserInputService:GetFocusedTextBox() then return end
+        if not camLockEnabled then return end
+
+        if camLockTarget then
+            camLockTarget = nil
+        else
+            local closestPlayer = nil
+            local closestDistance = math.huge
+            local mousePos = UserInputService:GetMouseLocation()
+
+            for _, Player in pairs(Players:GetPlayers()) do
+                if Player == LocalPlayer then continue end
+                local character = Player.Character
+                if character then
+                    local HRP = character:FindFirstChild("Head")
+                    if HRP then
+                        local screenPos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(HRP.Position)
+                        if onScreen then
+                            local distance = (Vector2.new(mousePos.X, mousePos.Y) - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+                            if distance < closestDistance then
+                                closestDistance = distance
+                                closestPlayer = Player
+                            end
+                        end
+                    end
+                end
+            end
+
+            camLockTarget = closestPlayer
+        end
+    end,
+})
+
+RunService.RenderStepped:Connect(function()
+    if camLockEnabled and camLockTarget then
+        local character = camLockTarget.Character
+        if character then
+            local HRP = character:FindFirstChild("HumanoidRootPart")
+            if HRP then
+                local camera = workspace.CurrentCamera
+                local targetPosition = HRP.Position
+
+                -- Get the current camera CFrame
+                local currentCFrame = camera.CFrame
+
+                -- Calculate the new look direction
+                local lookVector = (targetPosition - currentCFrame.Position).Unit
+
+                -- Smoothly interpolate the look direction
+                local currentLookVector = currentCFrame.LookVector
+                local smoothedLookVector = currentLookVector:Lerp(lookVector, smoothness)
+
+                -- Update the camera's CFrame to face the smoothed direction
+                camera.CFrame = CFrame.new(currentCFrame.Position, currentCFrame.Position + smoothedLookVector)
+            end
+        end
+    end
+end)
+
+LeftGroupBox = Tabs.Visuals:AddLeftGroupbox('Cham Esp')
+
+-- The actual cham effect
+Players = game:GetService("Players")
+RunService = game:GetService("RunService")
+LocalPlayer = Players.LocalPlayer
+highlightColor = Color3.fromRGB(255, 255, 255)  -- Default color for chams
+
+-- Function to create a cham (highlight) effect for a player
+function CreateCham(player)
+    local character = player.Character or player.CharacterAdded:Wait()
+    if not character:FindFirstChild("HumanoidRootPart") then return end
+
+    -- Create the highlight object for the player's character
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ChamHighlight"
+    highlight.Parent = character
+    highlight.Adornee = character  -- Set the highlight target to the entire character
+    highlight.FillColor = highlightColor  -- Set color to chosen value
+    highlight.FillTransparency = 0.5  -- Make the highlight semi-transparent
+    highlight.OutlineTransparency = 1  -- Fully transparent outline (no outline)
+
+    -- Clean up when the character is removed
+    character:WaitForChild("HumanoidRootPart").AncestryChanged:Connect(function()
+        highlight:Destroy()  -- Remove the highlight when the player leaves or the character is destroyed
+    end)
+end
+
+-- UI Toggle for Chams
+LeftGroupBox:AddToggle('ChamsToggle', {
+    Text = 'Chams',
+    Default = false, -- Default value (true / false)
+    Tooltip = 'Toggles cham effect for players',
+
+    Callback = function(Value)
+        _G.chams = Value
+        -- Apply or remove the cham effect based on the toggle state
+        if _G.chams then
+            -- Apply cham effect for players when enabled
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character then
+                    CreateCham(player)
+                end
+            end
+        else
+            -- Remove cham effect for players when disabled
+            for _, player in pairs(Players:GetPlayers()) do
+                local character = player.Character
+                if character then
+                    local highlight = character:FindFirstChild("ChamHighlight")
+                    if highlight then
+                        highlight:Destroy()
+                    end
+                end
+            end
+        end
+    end
+})
+
+-- Add color picker UI for Chams
+LeftGroupBox:AddLabel('Color'):AddColorPicker('ColorPicker', {
+    Default = Color3.fromRGB(255, 255, 255), -- White color (default)
+    Title = 'Cham Color', -- Title of the color picker
+    Transparency = 0, -- Disables transparency changing for this color picker
+
+    Callback = function(Value)
+        highlightColor = Value  -- Update the highlight color when the user picks a color
+        -- Update the cham color for existing players
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local highlight = player.Character:FindFirstChild("ChamHighlight")
+                if highlight then
+                    highlight.FillColor = highlightColor  -- Apply the new color to the existing highlight
+                end
+            end
+        end
+    end
+})
+
+-- Handle player join to ensure chams are applied
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(character)
+        -- Wait until the character's root part is available before applying chams
+        local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+        if _G.chams and player ~= LocalPlayer then
+            CreateCham(player)  -- Apply cham if enabled and not the local player
+        end
+    end)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    -- Remove cham when player leaves
+    if player.Character then
+        local highlight = player.Character:FindFirstChild("ChamHighlight")
+        if highlight then
+            highlight:Destroy()
+        end
+    end
+end)
+
+-- Periodically update chams for players when enabled using RunService.Heartbeat
+RunService.Heartbeat:Connect(function()
+    if _G.chams then
+        -- Loop through all players and ensure chams are applied
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                -- Create cham if it doesn't exist for the player
+                local character = player.Character
+                if not character:FindFirstChild("ChamHighlight") then
+                    CreateCham(player)
+                end
+            end
+        end
+    else
+        -- Disable the cham effect if _G.chams is false
+        for _, player in pairs(Players:GetPlayers()) do
+            local character = player.Character
+            if character then
+                local highlight = character:FindFirstChild("ChamHighlight")
+                if highlight then
+                    highlight:Destroy()
+                end
+            end
+        end
+    end
+end)
+
+-- Ensure chams are applied to players who have respawned
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(character)
+        -- In case a player respawns
+        if _G.chams and player ~= LocalPlayer then
+            local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+            CreateCham(player)
+        end
+    end)
+end)
+
+-- Execute the toggle when the script is first run
+if _G.chams then
+    -- Enable the cham effect for players (not including local player)
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            CreateCham(player)
+        end
+    end
+else
+    -- Disable the cham effect for all players
+    for _, player in pairs(Players:GetPlayers()) do
+        local character = player.Character
+        if character then
+            local highlight = character:FindFirstChild("ChamHighlight")
+            if highlight then
+                highlight:Destroy()
+            end
+        end
+    end
+end
+
+LeftGroupBox = Tabs.Visuals:AddLeftGroupbox('Name Esp')
+
+Players = game:GetService("Players")
+RunService = game:GetService("RunService")
+Debris = game:GetService("Debris")  -- For cleanup
+LocalPlayer = Players.LocalPlayer
+
+displayOption = 'Username'  -- Default display option
+nameTagESPEnabled = false  -- Default for the name tag ESP toggle
+
+-- Function to create a name tag for a player
+function CreateNameTag(player)
+    if player == LocalPlayer or not player.Character then return end
+    local character = player.Character
+    local head = character:FindFirstChild("Head")
+    if not head then return end  -- Ensure head exists
+
+    -- Remove existing BillboardGui if any (prevents duplication)
+    local existingTag = character:FindFirstChildOfClass("BillboardGui")
+    if existingTag then existingTag:Destroy() end
+
+    -- Create BillboardGui and TextLabel for the name tag
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Parent = character
+    billboardGui.Size = UDim2.new(0, 75, 0, 20)  -- Adjusted size for better scaling
+    billboardGui.AlwaysOnTop = true
+    billboardGui.Adornee = head
+    billboardGui.StudsOffset = Vector3.new(0, 3, 0)  -- Lowered position closer to head
+
+    local nameTag = Instance.new("TextLabel")
+    nameTag.Parent = billboardGui
+    nameTag.Size = UDim2.new(1, 0, 1, 0)
+    nameTag.BackgroundTransparency = 1
+    nameTag.TextColor3 = Color3.new(1, 1, 1)
+    nameTag.TextStrokeTransparency = 0.5  -- Slightly stronger outline
+    nameTag.TextStrokeColor3 = Color3.new(0, 0, 0)
+    nameTag.TextSize = 10  -- Reduced text size for better clarity
+    nameTag.Font = Enum.Font.GothamBold  -- More readable font
+    nameTag.TextYAlignment = Enum.TextYAlignment.Center  -- Keep text centered properly
+
+    -- Set the name text
+    nameTag.Text = displayOption == "Username" and player.Name or player.DisplayName
+end
+
+-- Function to remove name tags
+function RemoveNameTags()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            local character = player.Character
+            local billboardGui = character:FindFirstChildOfClass("BillboardGui")
+            if billboardGui then
+                billboardGui:Destroy()
+            end
+        end
+    end
+end
+
+-- Add the toggle to enable or disable the Name Tag ESP
+LeftGroupBox:AddToggle('MyToggle', {
+    Text = 'Enable Name ESP',
+    Default = false,
+    Tooltip = 'Toggles the name tag ESP visibility.',
+    Callback = function(Value)
+        nameTagESPEnabled = Value
+        if nameTagESPEnabled then
+            for _, player in pairs(Players:GetPlayers()) do
+                CreateNameTag(player)
+            end
+        else
+            RemoveNameTags()
+        end
+    end
+})
+
+-- Add the dropdown for selecting between Username or DisplayName
+LeftGroupBox:AddDropdown('NameDisplayOption', {
+    Values = { 'DisplayName', 'Username' },
+    Default = 1,
+    Multi = false,
+    Text = 'Name Display Option',
+    Tooltip = 'Choose whether to display the player\'s Username or DisplayName',
+    Callback = function(Value)
+        displayOption = Value
+        if nameTagESPEnabled then
+            RemoveNameTags()
+            for _, player in pairs(Players:GetPlayers()) do
+                CreateNameTag(player)
+            end
+        end
+    end
+})
+
+-- Periodically update name tags for new players
+RunService.Heartbeat:Connect(function()
+    if nameTagESPEnabled then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and not player.Character:FindFirstChildOfClass("BillboardGui") then
+                CreateNameTag(player)
+            end
+        end
+    end
+end)
+
+LeftGroupBox = Tabs.Visuals:AddLeftGroupbox('Tracers')
+
+Players = game:GetService("Players")
+RunService = game:GetService("RunService")
+Debris = game:GetService("Debris")
+
+player = Players.LocalPlayer
+camera = workspace.CurrentCamera
+mouse = player:GetMouse()
+
+-- Settings for Tracers
+Settings = {
+    Tracer_Color = Color3.fromRGB(255, 255, 255),
+    Tracer_Thickness = 1,
+    Tracer_Origin = "Bottom",
+    Tracer_FollowMouse = false
+}
+
+-- Global toggle variables
+_G.TracersEnabled = false
+_G.TracersFollowMouse = false
+
+-- Tracer pool to reuse tracers
+tracerPool = {}
+
+-- Function to get or create a new tracer line
+function GetTracer()
+    local tracer = table.remove(tracerPool) -- Reuse if available
+    if not tracer then
+        tracer = Drawing.new("Line")
+        tracer.Visible = false
+        tracer.Color = Settings.Tracer_Color
+        tracer.Thickness = Settings.Tracer_Thickness
+        tracer.Transparency = 1
+    end
+    return tracer
+end
+
+-- Function to return tracers to the pool
+function ReturnTracer(tracer)
+    tracer.Visible = false
+    table.insert(tracerPool, tracer)
+end
+
+-- Function to determine tracer origin point
+function GetTracerOrigin()
+    local viewportSize = camera.ViewportSize
+    if _G.TracersFollowMouse then
+        return Vector2.new(mouse.X, mouse.Y + 60)
+    end
+    if Settings.Tracer_Origin == "Middle" then
+        return viewportSize * 0.5
+    elseif Settings.Tracer_Origin == "Bottom" then
+        return Vector2.new(viewportSize.X * 0.5, viewportSize.Y)
+    elseif Settings.Tracer_Origin == "Top" then
+        return Vector2.new(viewportSize.X * 0.5, 0)
+    elseif Settings.Tracer_Origin == "Left" then
+        return Vector2.new(0, viewportSize.Y * 0.5)
+    elseif Settings.Tracer_Origin == "Right" then
+        return Vector2.new(viewportSize.X, viewportSize.Y * 0.5)
+    end
+    return viewportSize * 0.5
+end
+
+-- Table to store active tracers
+activeTracers = {}
+
+-- Function to update tracers
+function UpdateTracers()
+    if not _G.TracersEnabled then
+        for plr, tracer in pairs(activeTracers) do
+            ReturnTracer(tracer)
+            activeTracers[plr] = nil
+        end
+        return
+    end
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player then
+            if not activeTracers[plr] then
+                activeTracers[plr] = GetTracer()
+            end
+
+            local tracer = activeTracers[plr]
+            local char = plr.Character
+            if char then
+                local rootPart = char:FindFirstChild("HumanoidRootPart")
+                local humanoid = char:FindFirstChild("Humanoid")
+
+                if rootPart and humanoid and humanoid.Health > 0 then
+                    local screenPos, onScreen = camera:WorldToViewportPoint(rootPart.Position)
+                    if onScreen then
+                        tracer.From = GetTracerOrigin()
+                        tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+                        tracer.Visible = true
+                    else
+                        tracer.Visible = false
+                    end
+                else
+                    ReturnTracer(tracer)
+                    activeTracers[plr] = nil
+                end
+            end
+        end
+    end
+end
+
+-- Function to handle new players
+function OnPlayerAdded(plr)
+    if _G.TracersEnabled then
+        activeTracers[plr] = GetTracer()
+    end
+end
+
+-- Function to handle player removal
+function OnPlayerRemoving(plr)
+    local tracer = activeTracers[plr]
+    if tracer then
+        ReturnTracer(tracer)
+        activeTracers[plr] = nil
+    end
+end
+
+-- Event connections
+Players.PlayerAdded:Connect(OnPlayerAdded)
+Players.PlayerRemoving:Connect(OnPlayerRemoving)
+
+-- RunService loop for updating tracers
+tracerConnection = nil
+function ToggleTracers(enabled)
+    _G.TracersEnabled = enabled
+
+    if enabled then
+        tracerConnection = RunService.RenderStepped:Connect(UpdateTracers)
+    else
+        if tracerConnection then
+            tracerConnection:Disconnect()
+            tracerConnection = nil
+        end
+        -- Cleanup all tracers
+        for plr, tracer in pairs(activeTracers) do
+            ReturnTracer(tracer)
+            activeTracers[plr] = nil
+        end
+    end
+end
+
+-- UI Elements
+LeftGroupBox:AddToggle('TracersToggle', {
+    Text = 'Tracers',
+    Default = false,
+    Tooltip = 'Toggle to enable or disable tracers',
+    Callback = ToggleTracers
+})
+
+LeftGroupBox:AddToggle('MouseFollowToggle', {
+    Text = 'Mouse Follow Tracers',
+    Default = false,
+    Tooltip = 'Toggle to enable or disable tracers following the mouse',
+    Callback = function(Value)
+        _G.TracersFollowMouse = Value
+    end
+})
+
+LeftGroupBox:AddDropdown('TracerPositionDropdown', {
+    Values = { 'Bottom', 'Top', 'Left', 'Right' },
+    Default = 1,
+    Multi = false,
+    Text = 'Tracer Position',
+    Tooltip = 'Select the starting position of the tracers',
+    Callback = function(Value)
+        Settings.Tracer_Origin = Value
+    end
+})
+
+Options.TracerPositionDropdown:OnChanged(function()
+    print('Tracer position changed. New value:', Options.TracerPositionDropdown.Value)
+end)
+
+local LeftGroupBox = Tabs.Visuals:AddLeftGroupbox('Box Esp')
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = game:GetService("Workspace").CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local ESP = {}
+ESP.Boxes = {}
+local scaleFactor = 1
+local espEnabled = false
+local espColor = Color3.fromRGB(255, 255, 255)
+
+function ESP:AddBox(player)
+    if player == LocalPlayer then return end
+    
+    local box = Drawing.new("Square")
+    box.Thickness = 1
+    box.Color = espColor
+    box.Filled = false
+    box.Transparency = 1
+    box.Visible = false
+    
+    ESP.Boxes[player] = box
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    if ESP.Boxes[player] then
+        ESP.Boxes[player]:Remove()
+        ESP.Boxes[player] = nil
+    end
+end)
+
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function()
+        if ESP.Boxes[player] then
+            ESP.Boxes[player]:Remove()
+        end
+        ESP:AddBox(player)
+    end)
+end)
+
+LeftGroupBox:AddToggle('ESPEnabled', {
+    Text = 'Boxes ESP',
+    Default = false,
+    Tooltip = 'Enable or disable the ESP boxes',
+    
+    Callback = function(Value)
+        espEnabled = Value
+        if not espEnabled then
+            for _, box in pairs(ESP.Boxes) do
+                box.Visible = false
+            end
+        end
+    end
+})
+
+LeftGroupBox:AddSlider('BoxSize', {
+    Text = 'Box Size',
+    Default = 1,
+    Min = 0.5,
+    Max = 3,
+    Rounding = 1,
+    Compact = false,
+
+    Callback = function(Value)
+        scaleFactor = Value
+    end
+})
+
+LeftGroupBox:AddLabel('Box Color'):AddColorPicker('ColorPicker', {
+    Default = Color3.new(1, 1, 1),
+    Title = 'Box Color',
+    Transparency = 0,
+    
+    Callback = function(Value)
+        espColor = Value
+        for _, box in pairs(ESP.Boxes) do
+            box.Color = espColor
+        end
+    end
+})
+
+RunService.Heartbeat:Connect(function()
+    if not espEnabled then return end
+    
+    local cameraPosition = Camera.CFrame.Position
+    for _, player in ipairs(Players:GetPlayers()) do
+        local character = player.Character
+        local box = ESP.Boxes[player]
+
+        if character and box then
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
+            local head = character:FindFirstChild("Head")
+            local humanoid = character:FindFirstChild("Humanoid")
+            local foot = character:FindFirstChild("LeftFoot") or character:FindFirstChild("RightFoot") or rootPart
+
+            if rootPart and head and foot and humanoid and humanoid.Health > 0 then
+                local headPos, headOnScreen = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
+                local footPos, footOnScreen = Camera:WorldToViewportPoint(foot.Position - Vector3.new(0, 1, 0))
+                
+                if headOnScreen and footOnScreen then
+                    local height = math.abs(headPos.Y - footPos.Y)
+                    local width = height / 2
+                    
+                    box.Size = Vector2.new(width * scaleFactor, height * scaleFactor)
+                    box.Position = Vector2.new(headPos.X - (width * scaleFactor) / 2, headPos.Y)
+                    box.Color = espColor
+                    box.Visible = true
+                else
+                    box.Visible = false
+                end
+            else
+                box.Visible = false
+            end
+        elseif not box and player ~= LocalPlayer then
+            ESP:AddBox(player)
+        end
+    end
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+    ESP:AddBox(player)
+end
+
+getgenv().envt = Tabs.Visuals:AddRightGroupbox("Ambience")
+getgenv().Lighting = game:GetService("Lighting")
+
+getgenv().DefaultFogStart = Lighting.FogStart
+getgenv().DefaultFogEnd = Lighting.FogEnd
+getgenv().DefaultFogColor = Lighting.FogColor
+getgenv().DefaultAmbient = Lighting.Ambient
+getgenv().DefaultTechnology = Lighting.Technology.Name
+
+getgenv().FogModified = false
+getgenv().AmbientModified = false
+
+envt:AddToggle('FogToggle', {
+    Text = 'Fog',
+    Default = false,
+    Callback = function(Value)
+        if Value then
+            Lighting.FogEnd = getgenv().FogEnd or DefaultFogEnd
+            Lighting.FogStart = getgenv().FogStart or DefaultFogStart
+            getgenv().FogModified = true  -- Track if fog settings are modified
+        else
+            Lighting.FogEnd = DefaultFogEnd
+            Lighting.FogStart = DefaultFogStart
+            Lighting.FogColor = DefaultFogColor
+            getgenv().FogModified = false  -- Reset flag
+        end
+    end
+}):AddColorPicker('FogColor', {
+    Default = DefaultFogColor,
+    Title = 'Fog Color',
+    Callback = function(Value)
+        Lighting.FogColor = Value
+    end
+})
+
+envt:AddSlider('FogStart', {
+    Text = 'Fog Start',
+    Default = DefaultFogStart,
+    Min = 0,
+    Max = 1000,
+    Rounding = 1,
+    Callback = function(Value)
+        getgenv().FogStart = Value
+        Lighting.FogStart = Value
+    end
+})
+
+envt:AddSlider('FogEnd', {
+    Text = 'Fog End',
+    Default = DefaultFogEnd,
+    Min = 10,
+    Max = 10000,
+    Rounding = 1,
+    Callback = function(Value)
+        getgenv().FogEnd = Value
+        Lighting.FogEnd = Value
+    end
+})
+
+envt:AddToggle('AmbientToggle', {
+    Text = 'Ambient',
+    Default = false,
+    Callback = function(Value)
+        if Value then
+            Lighting.Ambient = getgenv().AmbientColor or DefaultAmbient
+            getgenv().AmbientModified = true  -- Track if ambient settings are modified
+        else
+            Lighting.Ambient = DefaultAmbient
+            getgenv().AmbientModified = false  -- Reset flag
+        end
+    end
+}):AddColorPicker('AmbientColor', {
+    Default = DefaultAmbient,
+    Title = 'Ambient Color',
+    Callback = function(Value)
+        getgenv().AmbientColor = Value
+        Lighting.Ambient = Value
+    end
+})
+
+function restoreDefaultLightingSettings()
+    -- Restore fog settings if not modified
+    if not getgenv().FogModified then
+        Lighting.FogStart = DefaultFogStart
+        Lighting.FogEnd = DefaultFogEnd
+        Lighting.FogColor = DefaultFogColor
+    end
+    
+    if not getgenv().AmbientModified then
+        Lighting.Ambient = DefaultAmbient
+    end
+
+end
+
+local RightGroupBox = Tabs.Visuals:AddRightGroupbox('Settings')
+
+ MyButton = RightGroupBox:AddButton({
+    Text = 'Fps booster',
+    Func = function()
+        if not _G.Ignore then
+            _G.Ignore = {} -- Add Instances to this table to ignore them (e.g. _G.Ignore = {workspace.Map, workspace.Map2})
+        end
+        if not _G.WaitPerAmount then
+            _G.WaitPerAmount = 500 -- Set Higher or Lower depending on your computer's performance
+        end
+        if _G.SendNotifications == nil then
+            _G.SendNotifications = true -- Set to false if you don't want notifications
+        end
+        if _G.ConsoleLogs == nil then
+            _G.ConsoleLogs = false -- Set to true if you want console logs (mainly for debugging)
+        end
+        
+        
+        
+        if not game:IsLoaded() then
+            repeat
+                task.wait()
+            until game:IsLoaded()
+        end
+        if not _G.Settings then
+            _G.Settings = {
+                Players = {
+                    ["Ignore Me"] = true,
+                    ["Ignore Others"] = true,
+                    ["Ignore Tools"] = true
+                },
+                Meshes = {
+                    NoMesh = false,
+                    NoTexture = false,
+                    Destroy = false
+                },
+                Images = {
+                    Invisible = true,
+                    Destroy = false
+                },
+                Explosions = {
+                    Smaller = true,
+                    Invisible = false, -- Not recommended for PVP games
+                    Destroy = false -- Not recommended for PVP games
+                },
+                Particles = {
+                    Invisible = true,
+                    Destroy = false
+                },
+                TextLabels = {
+                    LowerQuality = false,
+                    Invisible = false,
+                    Destroy = false
+                },
+                MeshParts = {
+                    LowerQuality = true,
+                    Invisible = false,
+                    NoTexture = false,
+                    NoMesh = false,
+                    Destroy = false
+                },
+                Other = {
+                    ["FPS Cap"] = true, -- Set this true to uncap FPS
+                    ["No Camera Effects"] = true,
+                    ["No Clothes"] = true,
+                    ["Low Water Graphics"] = true,
+                    ["No Shadows"] = true,
+                    ["Low Rendering"] = false,
+                    ["Low Quality Parts"] = true,
+                    ["Low Quality Models"] = true,
+                    ["Reset Materials"] = true,
+                    ["Lower Quality MeshParts"] = true
+                }
+            }
+        end
+        local Players, Lighting, StarterGui, MaterialService = game:GetService("Players"), game:GetService("Lighting"), game:GetService("StarterGui"), game:GetService("MaterialService")
+        local ME, CanBeEnabled = Players.LocalPlayer, {"ParticleEmitter", "Trail", "Smoke", "Fire", "Sparkles"}
+        local function PartOfCharacter(Instance)
+            for i, v in pairs(Players:GetPlayers()) do
+                if v ~= ME and v.Character and Instance:IsDescendantOf(v.Character) then
+                    return true
+                end
+            end
+            return false
+        end
+        local function DescendantOfIgnore(Instance)
+            for i, v in pairs(_G.Ignore) do
+                if Instance:IsDescendantOf(v) then
+                    return true
+                end
+            end
+            return false
+        end
+        local function CheckIfBad(Instance)
+            if not Instance:IsDescendantOf(Players) and (_G.Settings.Players["Ignore Others"] and not PartOfCharacter(Instance) or not _G.Settings.Players["Ignore Others"]) and (_G.Settings.Players["Ignore Me"] and ME.Character and not Instance:IsDescendantOf(ME.Character) or not _G.Settings.Players["Ignore Me"]) and (_G.Settings.Players["Ignore Tools"] and not Instance:IsA("BackpackItem") and not Instance:FindFirstAncestorWhichIsA("BackpackItem") or not _G.Settings.Players["Ignore Tools"])--[[not PartOfCharacter(Instance)]] and (_G.Ignore and not table.find(_G.Ignore, Instance) and not DescendantOfIgnore(Instance) or (not _G.Ignore or type(_G.Ignore) ~= "table" or #_G.Ignore <= 0)) then
+                if Instance:IsA("DataModelMesh") then
+                    if _G.Settings.Meshes.NoMesh and Instance:IsA("SpecialMesh") then
+                        Instance.MeshId = ""
+                    end
+                    if _G.Settings.Meshes.NoTexture and Instance:IsA("SpecialMesh") then
+                        Instance.TextureId = ""
+                    end
+                    if _G.Settings.Meshes.Destroy or _G.Settings["No Meshes"] then
+                        Instance:Destroy()
+                    end
+                elseif Instance:IsA("FaceInstance") then
+                    if _G.Settings.Images.Invisible then
+                        Instance.Transparency = 1
+                        Instance.Shiny = 1
+                    end
+                    if _G.Settings.Images.LowDetail then
+                        Instance.Shiny = 1
+                    end
+                    if _G.Settings.Images.Destroy then
+                        Instance:Destroy()
+                    end
+                elseif Instance:IsA("ShirtGraphic") then
+                    if _G.Settings.Images.Invisible then
+                        Instance.Graphic = ""
+                    end
+                    if _G.Settings.Images.Destroy then
+                        Instance:Destroy()
+                    end
+                elseif table.find(CanBeEnabled, Instance.ClassName) then
+                    if _G.Settings["Invisible Particles"] or _G.Settings["No Particles"] or (_G.Settings.Other and _G.Settings.Other["Invisible Particles"]) or (_G.Settings.Particles and _G.Settings.Particles.Invisible) then
+                        Instance.Enabled = false
+                    end
+                    if (_G.Settings.Other and _G.Settings.Other["No Particles"]) or (_G.Settings.Particles and _G.Settings.Particles.Destroy) then
+                        Instance:Destroy()
+                    end
+                elseif Instance:IsA("PostEffect") and (_G.Settings["No Camera Effects"] or (_G.Settings.Other and _G.Settings.Other["No Camera Effects"])) then
+                    Instance.Enabled = false
+                elseif Instance:IsA("Explosion") then
+                    if _G.Settings["Smaller Explosions"] or (_G.Settings.Other and _G.Settings.Other["Smaller Explosions"]) or (_G.Settings.Explosions and _G.Settings.Explosions.Smaller) then
+                        Instance.BlastPressure = 1
+                        Instance.BlastRadius = 1
+                    end
+                    if _G.Settings["Invisible Explosions"] or (_G.Settings.Other and _G.Settings.Other["Invisible Explosions"]) or (_G.Settings.Explosions and _G.Settings.Explosions.Invisible) then
+                        Instance.BlastPressure = 1
+                        Instance.BlastRadius = 1
+                        Instance.Visible = false
+                    end
+                    if _G.Settings["No Explosions"] or (_G.Settings.Other and _G.Settings.Other["No Explosions"]) or (_G.Settings.Explosions and _G.Settings.Explosions.Destroy) then
+                        Instance:Destroy()
+                    end
+                elseif Instance:IsA("Clothing") or Instance:IsA("SurfaceAppearance") or Instance:IsA("BaseWrap") then
+                    if _G.Settings["No Clothes"] or (_G.Settings.Other and _G.Settings.Other["No Clothes"]) then
+                        Instance:Destroy()
+                    end
+                elseif Instance:IsA("BasePart") and not Instance:IsA("MeshPart") then
+                    if _G.Settings["Low Quality Parts"] or (_G.Settings.Other and _G.Settings.Other["Low Quality Parts"]) then
+                        Instance.Material = Enum.Material.Plastic
+                        Instance.Reflectance = 0
+                    end
+                elseif Instance:IsA("TextLabel") and Instance:IsDescendantOf(workspace) then
+                    if _G.Settings["Lower Quality TextLabels"] or (_G.Settings.Other and _G.Settings.Other["Lower Quality TextLabels"]) or (_G.Settings.TextLabels and _G.Settings.TextLabels.LowerQuality) then
+                        Instance.Font = Enum.Font.SourceSans
+                        Instance.TextScaled = false
+                        Instance.RichText = false
+                        Instance.TextSize = 14
+                    end
+                    if _G.Settings["Invisible TextLabels"] or (_G.Settings.Other and _G.Settings.Other["Invisible TextLabels"]) or (_G.Settings.TextLabels and _G.Settings.TextLabels.Invisible) then
+                        Instance.Visible = false
+                    end
+                    if _G.Settings["No TextLabels"] or (_G.Settings.Other and _G.Settings.Other["No TextLabels"]) or (_G.Settings.TextLabels and _G.Settings.TextLabels.Destroy) then
+                        Instance:Destroy()
+                    end
+                elseif Instance:IsA("Model") then
+                    if _G.Settings["Low Quality Models"] or (_G.Settings.Other and _G.Settings.Other["Low Quality Models"]) then
+                        Instance.LevelOfDetail = 1
+                    end
+                elseif Instance:IsA("MeshPart") then
+                    if _G.Settings["Low Quality MeshParts"] or (_G.Settings.Other and _G.Settings.Other["Low Quality MeshParts"]) or (_G.Settings.MeshParts and _G.Settings.MeshParts.LowerQuality) then
+                        Instance.RenderFidelity = 2
+                        Instance.Reflectance = 0
+                        Instance.Material = Enum.Material.Plastic
+                    end
+                    if _G.Settings["Invisible MeshParts"] or (_G.Settings.Other and _G.Settings.Other["Invisible MeshParts"]) or (_G.Settings.MeshParts and _G.Settings.MeshParts.Invisible) then
+                        Instance.Transparency = 1
+                        Instance.RenderFidelity = 2
+                        Instance.Reflectance = 0
+                        Instance.Material = Enum.Material.Plastic
+                    end
+                    if _G.Settings.MeshParts and _G.Settings.MeshParts.NoTexture then
+                        Instance.TextureID = ""
+                    end
+                    if _G.Settings.MeshParts and _G.Settings.MeshParts.NoMesh then
+                        Instance.MeshId = ""
+                    end
+                    if _G.Settings["No MeshParts"] or (_G.Settings.Other and _G.Settings.Other["No MeshParts"]) or (_G.Settings.MeshParts and _G.Settings.MeshParts.Destroy) then
+                        Instance:Destroy()
+                    end
+                end
+            end
+        end
+        coroutine.wrap(pcall)(function()
+            if (_G.Settings["Low Water Graphics"] or (_G.Settings.Other and _G.Settings.Other["Low Water Graphics"])) then
+                if not workspace:FindFirstChildOfClass("Terrain") then
+                    repeat
+                        task.wait()
+                    until workspace:FindFirstChildOfClass("Terrain")
+                end
+                workspace:FindFirstChildOfClass("Terrain").WaterWaveSize = 0
+                workspace:FindFirstChildOfClass("Terrain").WaterWaveSpeed = 0
+                workspace:FindFirstChildOfClass("Terrain").WaterReflectance = 0
+                workspace:FindFirstChildOfClass("Terrain").WaterTransparency = 0
+                if sethiddenproperty then
+                    sethiddenproperty(workspace:FindFirstChildOfClass("Terrain"), "Decoration", false)
+                else
+                    warn("Your exploit does not support sethiddenproperty, please use a different exploit.")
+                end
+                if _G.ConsoleLogs then
+                    warn("Low Water Graphics Enabled")
+                end
+            end
+        end)
+        coroutine.wrap(function()
+            pcall(function()
+                if _G.Settings["No Shadows"] or (_G.Settings.Other and _G.Settings.Other["No Shadows"]) then
+                    Lighting.GlobalShadows = false
+                    Lighting.FogEnd = 9e9
+                    Lighting.ShadowSoftness = 0
+                    if sethiddenproperty then
+                        sethiddenproperty(Lighting, "Technology", 2)
+                    end
+                    if _G.ConsoleLogs then
+                        warn("No Shadows Enabled")
+                    end
+                end
+            end)
+        end)()
+        
+        -- Low Rendering
+        coroutine.wrap(function()
+            pcall(function()
+                if _G.Settings["Low Rendering"] or (_G.Settings.Other and _G.Settings.Other["Low Rendering"]) then
+                    settings().Rendering.QualityLevel = 1
+                    settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level04
+                    if _G.ConsoleLogs then
+                        warn("Low Rendering Enabled")
+                    end
+                end
+            end)
+        end)()
+        
+        -- Reset Materials
+        coroutine.wrap(function()
+            pcall(function()
+                if _G.Settings["Reset Materials"] or (_G.Settings.Other and _G.Settings.Other["Reset Materials"]) then
+                    for i, v in pairs(MaterialService:GetChildren()) do
+                        v:Destroy()
+                    end
+                    if _G.ConsoleLogs then
+                        warn("Reset Materials Enabled")
+                    end
+                end
+            end)
+        end)()
+        coroutine.wrap(function()
+            pcall(function()
+                if _G.Settings["FPS Cap"] or (_G.Settings.Other and _G.Settings.Other["FPS Cap"]) then
+                    local fpsCapSetting = _G.Settings["FPS Cap"] or (_G.Settings.Other and _G.Settings.Other["FPS Cap"])
+        
+                    if type(fpsCapSetting) == "string" or type(fpsCapSetting) == "number" then
+                        if setfpscap then
+                            setfpscap(tonumber(fpsCapSetting))
+                            if _G.ConsoleLogs then
+                                warn("FPS Capped to " .. tostring(fpsCapSetting))
+                            end
+                        end
+                    elseif fpsCapSetting == true then
+                        if setfpscap then
+                            setfpscap(1e6)
+                            if _G.ConsoleLogs then
+                                warn("FPS Uncapped")
+                            end
+                        end
+                    end
+                else
+                    warn("FPS Cap Failed")
+                end
+            end)
+        end)()
+        game.DescendantAdded:Connect(function(value)
+            wait(_G.LoadedWait or 1)
+            CheckIfBad(value)
+        end)
+        
+        local Descendants = game:GetDescendants()
+        local StartNumber = _G.WaitPerAmount or 500
+        local WaitNumber = _G.WaitPerAmount or 500
+        if _G.ConsoleLogs then
+            warn("Checking " .. #Descendants .. " Instances...")
+        end
+        for i, v in pairs(Descendants) do
+            CheckIfBad(v)
+            if i == WaitNumber then
+                task.wait()
+                if _G.ConsoleLogs then
+                    print("Loaded " .. i .. "/" .. #Descendants)
+                end
+                WaitNumber = WaitNumber + StartNumber
+            end
+        end
+        
+        StarterGui:SetCore("SendNotification", {
+            Title = "Fps Booster Loaded",
+            Text = "",
+            Duration = 5,
+        })
+        
+        warn("FPS Booster Loaded!")
+        --game.DescendantAdded:Connect(CheckIfBad)
+        --[[game.DescendantAdded:Connect(function(value)
+            CheckIfBad(value)
+        end)]]
+    end,
+    DoubleClick = true,
+    Tooltip = 'Please wait some seconds until it fully loads'
+    })
+
+local lighting = game:GetService("Lighting")
+    local StarterGui = game:GetService("StarterGui")
+    local debris = game:GetService("Debris")
+
+    -- Store common values in variables to minimize repetitive calls
+    local fogEnd = lighting.FogEnd
+    local fogStart = lighting.FogStart
+
+    -- Create the toggle button (integrated from your provided example)
+    RightGroupBox:AddToggle('MyToggle', {
+    Text = 'No Fog',
+    Default = false, -- Default value (true / false)
+    Tooltip = 'This removes any kind of Fog from the game', -- Information shown when you hover over the toggle
+
+    Callback = function(Value)
+        if Value then
+            -- Check if the fog removal has been executed before
+            if not _G.FogRemovalExecuted then
+                -- Store original fog settings
+                _G.OriginalFogSettings = {
+                    FogEnd = fogEnd,
+                    FogStart = fogStart,
+                }
+
+                -- Remove fog by setting extreme values for FogEnd and FogStart
+                lighting.FogEnd = 100000  -- Set this to a high value to push fog far away
+                lighting.FogStart = 0     -- Set this to 0 to ensure fog doesn't start close
+
+                -- Optionally remove any atmosphere if present
+                local atmosphere = lighting:FindFirstChildOfClass("Atmosphere")
+                if atmosphere then
+                    atmosphere:Destroy()
+                end
+
+                -- Set the flag to indicate it has been executed
+                _G.FogRemovalExecuted = true
+            end
+        else
+            -- Reset the fog settings back to the original values
+            if _G.FogRemovalExecuted then
+                lighting.FogEnd = _G.OriginalFogSettings.FogEnd
+                lighting.FogStart = _G.OriginalFogSettings.FogStart
+
+                -- Reset the flag to indicate it's no longer executed
+                _G.FogRemovalExecuted = false
+            end
+        end
+
+        -- Print the toggle status to the console
+        print('[cb] MyToggle changed to:', Value)
+    end
+    })
+
+    RightGroupBox:AddToggle('MyToggle', {
+        Text = 'Fullbright',
+        Default = false, -- Default value (true / false)
+        Tooltip = 'Removes shadows and increases brightness', -- Information shown when you hover over the toggle
+    
+        Callback = function(Value)
+            if not _G.FullBrightExecuted then
+                _G.FullBrightEnabled = false
+    
+                local Lighting = game:GetService("Lighting")
+                
+                -- Store default settings in a table
+                _G.NormalLightingSettings = {
+                    Brightness = Lighting.Brightness,
+                    ClockTime = Lighting.ClockTime,
+                    GlobalShadows = Lighting.GlobalShadows,
+                    Ambient = Lighting.Ambient
+                }
+    
+                -- Full Bright settings
+                local FullBrightSettings = {
+                    Brightness = 1,
+                    ClockTime = 12,
+                    GlobalShadows = false,
+                    Ambient = Color3.fromRGB(178, 178, 178)
+                }
+    
+                -- Set lighting properties
+                local function setLightingProperties(properties)
+                    for property, value in pairs(properties) do
+                        Lighting[property] = value
+                    end
+                end
+    
+                -- Initial setup
+                setLightingProperties(FullBrightSettings)
+    
+                -- Create a single function to handle property changes
+                local function createPropertyChangeListener(property, defaultValue, newValue)
+                    Lighting:GetPropertyChangedSignal(property):Connect(function()
+                        if Lighting[property] ~= defaultValue and Lighting[property] ~= _G.NormalLightingSettings[property] then
+                            _G.NormalLightingSettings[property] = Lighting[property]
+                            if not _G.FullBrightEnabled then
+                                repeat wait() until _G.FullBrightEnabled
+                            end
+                            Lighting[property] = newValue
+                        end
+                    end)
+                end
+    
+                -- Set up property listeners
+                for property, newValue in pairs(FullBrightSettings) do
+                    createPropertyChangeListener(property, newValue, newValue)
+                end
+    
+                -- Periodically toggle FullBright settings
+                local LatestValue = true
+                spawn(function()
+                    while wait() do
+                        if _G.FullBrightEnabled ~= LatestValue then
+                            if not _G.FullBrightEnabled then
+                                setLightingProperties(_G.NormalLightingSettings)
+                            else
+                                setLightingProperties(FullBrightSettings)
+                            end
+                            LatestValue = not LatestValue
+                        end
+                    end
+                end)
+            end
+    
+            -- Toggle full bright state
+            _G.FullBrightExecuted = true
+            _G.FullBrightEnabled = Value -- directly using Value here to toggle the state
+        end
+    })    
+
+RightGroupBox = Tabs.Visuals:AddRightGroupbox('Damage Display')
+
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local UserInputService = game:GetService("UserInputService")
+    local TweenService = game:GetService("TweenService")
+    local Camera = game.Workspace.CurrentCamera
+    local RaycastParams = RaycastParams.new()
+    RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    RaycastParams.IgnoreWater = true
+
+    -- Settings
+    local font = Enum.Font.SourceSansBold
+    local baseSize = 32
+    local distance = 500 -- Maximum distance at which damage numbers will be visible
+    local animationDuration = 3 -- Time it takes for the number to slowly move upwards
+    local fadeDuration = 1 -- Time it takes for the number to fade away after floating
+    local maxOffset = 20 -- Maximum random offset for damage numbers
+
+    local isDamageNumbersEnabled = false  -- Toggle state for enabling/disabling damage numbers
+    local damageColor = Color3.fromRGB(255, 255, 255)  -- Default red color for damage numbers
+
+    -- Previous health of the nearest player
+    local previousHealth = {}
+
+    -- Function to check if a player is behind a wall
+    local function isPlayerVisible(player)
+        if not player.Character or not player.Character:FindFirstChild("Head") then return false end
+        local head = player.Character.Head
+        local origin = Camera.CFrame.Position
+        local direction = (head.Position - origin).Unit * (head.Position - origin).Magnitude
+        RaycastParams.FilterDescendantsInstances = {Players.LocalPlayer.Character}
+        local result = workspace:Raycast(origin, direction, RaycastParams)
+        return not result or result.Instance:IsDescendantOf(player.Character)
+    end
+
+    -- Function to get the player nearest to the cursor with visibility check
+    local function getNearestToCursor()
+        local mouseLocation = UserInputService:GetMouseLocation()
+        local nearestPlayer
+        local shortestDistance = math.huge
+
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= Players.LocalPlayer and player.Character and player.Character:FindFirstChild("Head") and isPlayerVisible(player) then
+                local head = player.Character.Head
+                local screenPosition, onScreen = Camera:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    local distanceToCursor = (Vector2.new(screenPosition.X, screenPosition.Y) - mouseLocation).Magnitude
+                    if distanceToCursor < shortestDistance then
+                        shortestDistance = distanceToCursor
+                        nearestPlayer = player
+                    end
+                end
+            end
+        end
+        return nearestPlayer
+    end
+
+    -- Function to create damage number display
+    local function createDamageDisplay(player, damageAmount)
+        if not isDamageNumbersEnabled then return end
+
+        local head = player.Character and player.Character:FindFirstChild("Head")
+        if head then
+            local damageContainer = head:FindFirstChild("DamageContainer")
+            if not damageContainer then
+                damageContainer = Instance.new("BillboardGui")
+                damageContainer.Name = "DamageContainer"
+                damageContainer.Parent = head
+                damageContainer.Adornee = head
+                damageContainer.Size = UDim2.new(0, 100, 0, 50)
+                damageContainer.StudsOffset = Vector3.new(0, 2, 0)
+                damageContainer.AlwaysOnTop = true
+                damageContainer.MaxDistance = distance
+                damageContainer.Enabled = true
+            end
+
+            -- Create the new damage number label
+            local textLabel = Instance.new("TextLabel")
+            textLabel.Parent = damageContainer
+            textLabel.Text = tostring(damageAmount)
+            textLabel.TextColor3 = damageColor
+            textLabel.TextSize = baseSize + (damageAmount / 10) -- Scale size based on damage
+            textLabel.Font = font
+            textLabel.BackgroundTransparency = 1
+            textLabel.Size = UDim2.new(1, 0, 0, baseSize)
+            textLabel.TextStrokeTransparency = 0.4
+            textLabel.Position = UDim2.new(0.5, -50 + math.random(-maxOffset, maxOffset), 0, math.random(-maxOffset, maxOffset)) -- Random offset
+
+            -- Target position for the damage number to slowly move upwards
+            local targetPosition = UDim2.new(0.5, -50, 0, -100) -- Final position for all damage numbers
+
+            -- Create the upward movement tween
+            local moveUpTween = TweenService:Create(
+                textLabel, 
+                TweenInfo.new(animationDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), 
+                {Position = targetPosition}
+            )
+
+            -- Create the fade-out tween
+            local fadeOutTween = TweenService:Create(
+                textLabel,
+                TweenInfo.new(fadeDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+                {TextTransparency = 1, TextStrokeTransparency = 1} -- Fade both text and stroke
+            )
+
+            -- Play the move-up tween
+            moveUpTween:Play()
+
+            -- Once the move-up animation is completed, start fading out
+            moveUpTween.Completed:Connect(function()
+                fadeOutTween:Play()
+
+                -- Destroy the label after the fade-out is complete
+                fadeOutTween.Completed:Connect(function()
+                    textLabel:Destroy()
+                end)
+            end)
+        end
+    end
+
+    -- Function to check and display damage numbers for the nearest player
+    local function checkNearestPlayerDamage()
+        local nearestPlayer = getNearestToCursor()
+
+        if nearestPlayer and nearestPlayer.Character and nearestPlayer.Character:FindFirstChildOfClass("Humanoid") then
+            local humanoid = nearestPlayer.Character:FindFirstChildOfClass("Humanoid")
+            local currentHealth = humanoid.Health
+
+            -- Get the previous health of the player, or set it to their current health if not tracked
+            local prevHealth = previousHealth[nearestPlayer.UserId] or currentHealth
+
+            -- If the player has lost health, display the damage number
+            if currentHealth < prevHealth and isDamageNumbersEnabled then
+                createDamageDisplay(nearestPlayer, math.floor(prevHealth - currentHealth))
+            end
+
+            -- Update the player's previous health
+            previousHealth[nearestPlayer.UserId] = currentHealth
+        end
+    end
+
+    -- Run every frame to check the nearest player's health
+    RunService.RenderStepped:Connect(checkNearestPlayerDamage)
+
+    -- Integrating UI Toggle for enabling/disabling damage numbers and Color Picker
+    RightGroupBox:AddToggle('DamageNumbersToggle', {
+        Text = 'Damage numbers',
+        Default = false, -- Default value (false so it doesn't show on script execution)
+        Tooltip = 'Shows damage dealt with numbers',
+        Callback = function(Value)
+            isDamageNumbersEnabled = Value
+        end
+    })
+
+    RightGroupBox:AddLabel('numbers color'):AddColorPicker('DamageColorPicker', {
+        Default = damageColor, -- Default color for damage numbers
+        Title = 'Number Color', -- Title of the color picker
+        Transparency = 0, -- Enable transparency control for the color picker
+        Callback = function(Value)
+            damageColor = Value
+        end
+    })
+
+    Options.DamageColorPicker:OnChanged(function()
+        print('Damage Number Color changed to:', Options.DamageColorPicker.Value)
+    end)
+
+local RightGroupBox = Tabs.Visuals:AddRightGroupbox('Audio Player')  
+
+local soundEnabled = false 
+local soundVolume = 1  -- Default volume
+local soundList = {     
+    ["No disrespect"] = 90317758270266,     
+    ["The city of Memphis"] = 106172723805803,     
+    ["Los Gangster  [inst]"] = 107558212312864,
+    ["with my chest"] = 85096138905039,
+    ["lucid dreams"] = 1837103530,
+    ["jc wrld"] = 5410084938,
+    ["2023 ah phonk"] = 15689451063
+}
+
+local selectedSound = soundList["No disrespect"]
+
+local currentSound = nil  -- To keep track of the currently playing sound
+
+local function getSoundKeys()
+    local keys = {}
+    for key, _ in pairs(soundList) do
+        table.insert(keys, key)
+    end
+    return keys
+end
+
+RightGroupBox:AddToggle('EnableMusic', {     
+    Text = 'Enable Music',     
+    Default = false,     
+    Tooltip = 'Turn the music system on/off',         
+    Callback = function(Value)         
+        soundEnabled = Value     
+        -- If the toggle is off, stop the sound if it's playing
+        if not soundEnabled and currentSound then
+            currentSound:Stop()
+            currentSound:Destroy()
+            currentSound = nil
+            print("Sound stopped as the toggle is off.")
+        end
+    end 
+})  
+
+RightGroupBox:AddDropdown('SoundDropdown', {     
+    Values = getSoundKeys(),     
+    Default = 1,     
+    Multi = false,     
+    Text = 'Select Sound',         
+    Callback = function(Value)         
+        selectedSound = soundList[Value]     
+    end 
+})  
+
+RightGroupBox:AddSlider('VolumeSlider', {     
+    Text = 'Sound Volume',     
+    Default = soundVolume,     
+    Min = 0,     
+    Max = 5,     
+    Rounding = 1,     
+    Compact = false,     
+    Callback = function(Value)         
+        soundVolume = Value  -- Update the soundVolume with the slider value
+        print('[cb] Volume set to:', Value)
+        -- Update the volume of the currently playing sound
+        if currentSound then
+            currentSound.Volume = soundVolume
+        end
+    end 
+})
+
+RightGroupBox:AddButton({     
+    Text = 'Play Music',     
+    Func = function()         
+        -- Only play the sound if the toggle is enabled
+        if soundEnabled then
+            print("Sound Enabled: Attempting to play sound")
+
+            -- Create and configure the sound
+            if currentSound then
+                -- Stop the previous sound if it was playing
+                currentSound:Stop()
+                currentSound:Destroy()
+            end
+
+            currentSound = Instance.new("Sound")
+            currentSound.SoundId = "rbxassetid://" .. selectedSound
+            currentSound.Volume = soundVolume  -- Use the updated volume from the slider
+            currentSound.Parent = game:GetService("SoundService")  -- Parent to SoundService
+
+            -- Play the sound
+            currentSound:Play()
+
+            -- Cleanup sound after it ends
+            currentSound.Ended:Connect(function()
+                currentSound:Destroy()
+                currentSound = nil
+            end)
+        else
+            print("Sound is Disabled")
+        end
+    end,     
+    Tooltip = 'Plays the selected sound' 
+})
+
+local uhhh = Tabs.Player:AddLeftGroupbox('Movement')
+
+uhhh:AddToggle('WalkSpeedToggle', {
+    Text = 'Enable WalkSpeed',
+    Default = false,
+    Callback = function(state)
+        getgenv().walkSpeedEnabled = state
+        if not state then getgenv().walkSpeedKeybindActive = false end
+    end,
+})
+
+Toggles.WalkSpeedToggle:AddKeyPicker('WalkSpeedKeybind', {
+    Default = 'X',
+    Text = 'Speed Keybind',
+    Mode = 'Toggle',
+    Callback = function(state)
+        if game:GetService("UserInputService"):GetFocusedTextBox() then return end
+        if getgenv().walkSpeedEnabled then getgenv().walkSpeedKeybindActive = state end
+    end,
+})
+
+uhhh:AddSlider('WalkSpeedSlider', {
+    Text = 'Speed',
+    Default = 16,
+    Min = 16,
+    Max = 500,
+    Rounding = 0,
+    Callback = function(value)
+        getgenv().walkSpeed = value
+    end,
+})
+
+game:GetService('RunService').RenderStepped:Connect(function()
+    local player = game.Players.LocalPlayer
+    local character = player.Character
+    local humanoid = character and character:FindFirstChild('Humanoid')
+    
+    if not humanoid then return end
+
+    local userInputService = game:GetService("UserInputService")
+    local isSprinting = userInputService:IsKeyDown(Enum.KeyCode.LeftShift) or userInputService:IsKeyDown(Enum.KeyCode.RightShift)
+
+    if getgenv().walkSpeedEnabled and getgenv().walkSpeedKeybindActive then
+        humanoid.WalkSpeed = getgenv().walkSpeed
+    elseif isSprinting then
+        humanoid.WalkSpeed = 26
+    else
+        humanoid.WalkSpeed = 16
+    end
+end)
+
+getgenv().cframeSpeedEnabled = false
+getgenv().cframeSpeedKeybindActive = false
+getgenv().cframeSpeedAmount = 150
+getgenv().cframeSpeedKeybind = Enum.KeyCode.V
+
+uhhh:AddToggle('CFrameSpeedToggle', {
+    Text = 'CFrame Speed',
+    Default = false,  -- Default should be false, so it's not active when the script runs
+    Tooltip = 'Toggles speed using CFrame',
+    Callback = function(state)
+        getgenv().cframeSpeedEnabled = state
+        if not state then
+            getgenv().cframeSpeedKeybindActive = false  -- Automatically deactivate the keybind when toggle is off
+        end
+    end,
+}):AddKeyPicker('CFrameSpeedKeybind', {
+    Default = 'V',
+    Text = 'Keybind',
+    Mode = 'Toggle',
+    Callback = function(state)
+        if game:GetService("UserInputService"):GetFocusedTextBox() then return end
+        getgenv().cframeSpeedKeybindActive = state
+    end,
+})
+
+uhhh:AddSlider('CFrameSpeedSlider', {
+    Text = 'Speed',
+    Default = 150,
+    Min = 16,
+    Max = 1000,
+    Rounding = 0,
+    Callback = function(value)
+        getgenv().cframeSpeedAmount = value
+    end
+})
+
+-- Utility functions
+local function hasCharacter(player)
+    local character = player and player.Character
+    return character and character:FindFirstChild("HumanoidRootPart", true) and character:FindFirstChild("Humanoid", true)
+end
+
+local function updateCframeSpeed(deltaTime)
+    if getgenv().cframeSpeedEnabled and getgenv().cframeSpeedKeybindActive and hasCharacter(game.Players.LocalPlayer) then
+        local character = game.Players.LocalPlayer.Character
+        local hrp = character:FindFirstChild("HumanoidRootPart", true)
+        local humanoid = character:FindFirstChild("Humanoid", true)
+        local moveDirection = humanoid and humanoid.MoveDirection
+
+        if hrp and moveDirection then
+            local movement = moveDirection.Unit * getgenv().cframeSpeedAmount * deltaTime
+            if movement.Magnitude > 0 then
+                hrp.CFrame = hrp.CFrame + movement
+            end
+        end
+    end
+end
+
+-- RenderStepped connection for CFrame Speed
+game:GetService("RunService").Heartbeat:Connect(updateCframeSpeed)
+
+-- Keybind Listener for CFrame Speed Toggle
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == getgenv().cframeSpeedKeybind then
+        if getgenv().cframeSpeedToggleAllowed then
+            getgenv().cframeSpeedKeybindActive = not getgenv().cframeSpeedKeybindActive
+        end
+    end
+end)
+
+getgenv().rageCFrameFlyEnabled = false
+getgenv().rageCFrameFlyKeybindActive = false
+getgenv().rageCFrameFlyAmount = 250
+getgenv().rageCFrameFlyKeybind = Enum.KeyCode.B
+
+-- UI integration: CFrame Fly Toggle and Keybind
+uhhh:AddToggle('CframeFlightToggle', {
+    Text = 'Cframe Flight',
+    Default = false,  -- Default to off, so flight won't be active at script start
+    Tooltip = 'Toggles flight using CFrame',
+    Callback = function(state)
+        getgenv().rageCFrameFlyEnabled = state
+        if not state then
+            getgenv().rageCFrameFlyKeybindActive = false  -- Automatically deactivate keybind when toggle is off
+        end
+    end
+}):AddKeyPicker('CframeFlyKeybind', {
+    Default = 'B',
+    Text = 'Keybind',
+    Mode = 'Toggle',
+    Callback = function(state)
+        if game:GetService("UserInputService"):GetFocusedTextBox() then return end
+        getgenv().rageCFrameFlyKeybindActive = state
+    end,
+})
+
+-- Slider for adjusting flight speed
+uhhh:AddSlider('CframeFlightSpeed', {
+    Text = 'Speed',
+    Default = 250,
+    Min = 16,
+    Max = 2000,
+    Rounding = 0,
+    Callback = function(value)
+        getgenv().rageCFrameFlyAmount = value
+    end
+})
+
+-- Utility functions
+local function hasCharacter(player)
+    local character = player and player.Character
+    return character and character:FindFirstChild("HumanoidRootPart", true) and character:FindFirstChild("Humanoid", true)
+end
+
+local function updateFly(deltaTime)
+    if getgenv().rageCFrameFlyEnabled and getgenv().rageCFrameFlyKeybindActive and hasCharacter(game.Players.LocalPlayer) then
+        local character = game.Players.LocalPlayer.Character
+        local hrp = character:FindFirstChild("HumanoidRootPart", true)
+        local moveDirection = character:FindFirstChild("Humanoid", true).MoveDirection
+
+        -- Vertical movement based on key input (Space to go up, LeftShift to go down)
+        local verticalSpeed = (UserInputService:IsKeyDown(Enum.KeyCode.Space) and 1 or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and -1 or 0)
+        local verticalMovement = Vector3.new(0, verticalSpeed, 0)
+
+        -- Combine horizontal and vertical movement for consistent speed
+        local movement = (moveDirection + verticalMovement).Unit * getgenv().rageCFrameFlyAmount * deltaTime
+
+        -- Update position using CFrame
+        if movement.Magnitude > 0 then
+            hrp.CFrame = hrp.CFrame + movement
+        end
+
+        -- Adjust velocity to prevent conflicts
+        hrp.Velocity = Vector3.zero
+    end
+end
+
+-- RenderStepped connection for CFrame Flight
+game:GetService("RunService").Heartbeat:Connect(updateFly)
+
+-- Input Listener for Keybind to toggle flight
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == getgenv().rageCFrameFlyKeybind then
+        if getgenv().rageCFrameFlyToggleAllowed then
+            getgenv().rageCFrameFlyKeybindActive = not getgenv().rageCFrameFlyKeybindActive
+        end
+    end
+end)
+
+local AnimationSpeed = 1
+
+local animation = Instance.new("Animation")
+animation.AnimationId = "rbxassetid://10714340543"
+
+local animationTrack
+local isPlaying = false
+local flossEnabled = false
+
+local function loadAnimationTrack(character)
+    local humanoid = character:WaitForChild("Humanoid")
+    animationTrack = humanoid:LoadAnimation(animation)
+    animationTrack.Looped = true
+    animationTrack.Priority = Enum.AnimationPriority.Action
+    
+    if flossEnabled then
+        task.wait(0.6)
+        animationTrack:Play()
+        animationTrack:AdjustSpeed(AnimationSpeed)
+        isPlaying = true
+    end
+end
+
+game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function(character)
+    loadAnimationTrack(character)
+end)
+
+if game:GetService("Players").LocalPlayer.Character then
+    loadAnimationTrack(game:GetService("Players").LocalPlayer.Character)
+end
+
+uhhh:AddToggle("FlossToggle", {
+    Text = "floss",
+    Default = false,
+    Callback = function(state)
+        flossEnabled = state
+        if state and animationTrack then
+            animationTrack:Play()
+            animationTrack:AdjustSpeed(AnimationSpeed)
+            isPlaying = true
+        elseif not state and animationTrack then
+            animationTrack:Stop()
+            isPlaying = false
+        end
+    end
+}):AddKeyPicker("FlossKeybindPicker", {
+    Default = "V",
+    Text = "Floss",
+    Mode = "Toggle",
+    Callback = function(key)
+        if UserInputService:GetFocusedTextBox() then return end
+        if flossEnabled and animationTrack then
+            if isPlaying then
+                animationTrack:Stop()
+            else
+                animationTrack:Play()
+                animationTrack:AdjustSpeed(AnimationSpeed)
+            end
+            isPlaying = not isPlaying
+        end
+    end
+})
+
+uhhh:AddToggle("NoClipToggle", {
+    Text = "no-clip",
+    Default = false,
+    Callback = function(state)
+        noClipEnabled = state
+    end
+}):AddKeyPicker("NoClipKeybindPicker", {
+    Default = "J",
+    Text = "NoClip",
+    Mode = "Toggle",
+    Callback = function(state)
+        if noClipEnabled then
+            local character = game:GetService("Players").LocalPlayer.Character
+            if character then
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") and not part.Name:match("Arm") and not part.Name:match("Leg") then
+                        part.CanCollide = state
+                    end
+                end
+            end
+        end
+    end
+})
+
+local function toggleNoJumpCooldown(enabled)
+    local player = game.Players.LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+
+    local function updateJumpSettings(humanoid, state)
+        humanoid.UseJumpPower = not state
+        print("Jump cooldown " .. (state and "disabled!" or "enabled!"))
+    end
+
+    updateJumpSettings(humanoid, enabled)
+
+    player.CharacterAdded:Connect(function(newCharacter)
+        local newHumanoid = newCharacter:WaitForChild("Humanoid")
+        updateJumpSettings(newHumanoid, enabled)
+    end)
+end
+
+uhhh:AddToggle('NoJumpCooldownToggle', {
+    Text = 'No Jump Cooldown',
+    Default = false,
+    Tooltip = 'Toggles the jump cooldown on or off',
+    Callback = function(value)
+        _G.noJumpCooldownEnabled = value
+        toggleNoJumpCooldown(value)
+        print('[cb] NoJumpCooldownToggle changed to:', value)
+    end
+})
+
+-- Anti-Slow functionality
+local gh = false
+local debris = game:GetService("Debris")
+local player = game.Players.LocalPlayer
+local toggleValue = false
+
+local function notify(title, description)
+    print(title .. ": " .. description)
+end
+
+local function antiSlowToggle(value)
+    if value == true then
+        gh = true
+
+        game:GetService('RunService'):BindToRenderStep("Anti-Slow", 0 , function()
+            if player.Character then
+                local bodyEffects = player.Character:WaitForChild("BodyEffects", 10)
+                local movement = bodyEffects and bodyEffects:WaitForChild("Movement", 10)
+
+                if movement then
+                    local noWalkSpeed = movement:FindFirstChild("NoWalkSpeed")
+                    if noWalkSpeed then
+                        noWalkSpeed:Destroy()
+                    end
+
+                    local reduceWalk = movement:FindFirstChild("ReduceWalk")
+                    if reduceWalk then
+                        reduceWalk:Destroy()
+                    end
+
+                    local noJumping = movement:FindFirstChild("NoJumping")
+                    if noJumping then
+                        noJumping:Destroy()
+                    end
+                end
+
+                if bodyEffects and bodyEffects.Reload and bodyEffects.Reload.Value == true then
+                    bodyEffects.Reload.Value = false
+                end
+            end
+        end)
+    else
+        gh = false
+        game:GetService('RunService'):UnbindFromRenderStep("Anti-Slow")
+    end
+end
+
+-- Add the Anti-Slow toggle to the same groupbox
+uhhh:AddToggle('AntiSlowToggle', {
+    Text = 'Anti-Slow',
+    Default = false,
+    Tooltip = 'Removes any kind of slowness',
+    Callback = function(Value)
+        toggleValue = Value
+        antiSlowToggle(Value)
+    end
+})
+
+-- Listen for character respawn and reapply the anti-slow system
+player.CharacterAdded:Connect(function()
+    antiSlowToggle(toggleValue)
+end)
+
+-- Initial setup on first load
+if player.Character then
+    antiSlowToggle(toggleValue)
+end
+
+local stutz = Tabs.Player:AddLeftGroupbox('Character')
+
+local antifling = nil
+local lastChecked = 0
+local checkInterval = 1
+
+-- Anti-Fling Toggle
+stutz:AddToggle("AntiflingToggle", {
+    Text = "anti-fling",
+    Default = false,
+    Callback = function(state)
+        if state then
+            antifling = game:GetService("RunService").Stepped:Connect(function(_, time)
+                if time - lastChecked >= checkInterval then
+                    lastChecked = time
+                    for _, player in pairs(game:GetService("Players"):GetPlayers()) do
+                        if player ~= game.Players.LocalPlayer and player.Character then
+                            for _, v in pairs(player.Character:GetDescendants()) do
+                                if v:IsA("BasePart") then
+                                    v.CanCollide = false
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        else
+            if antifling then
+                antifling:Disconnect()
+                antifling = nil
+            end
+        end
+    end
+})
+
+-- No-Seats Toggle (Unique Identifier)
+local CollectionService = game:GetService("CollectionService")
+local cachedSeats = {}
+
+local function processSeat(seat, state)
+    if seat:IsA("Seat") and not cachedSeats[seat] then
+        cachedSeats[seat] = seat -- Cache the seat
+    end
+    if cachedSeats[seat] then
+        seat.Disabled = state -- Update the state
+        if state then
+            CollectionService:AddTag(seat, "Seat")
+        else
+            CollectionService:RemoveTag(seat, "Seat")
+        end
+    end
+end
+
+local function initializeSeats()
+    for _, object in ipairs(workspace:GetDescendants()) do
+        if object:IsA("Seat") then
+            cachedSeats[object] = object
+        end
+    end
+end
+
+local function monitorNewSeats()
+    workspace.DescendantAdded:Connect(function(descendant)
+        if descendant:IsA("Seat") then
+            processSeat(descendant, CollectionService:HasTag(descendant, "Seat"))
+        end
+    end)
+end
+
+stutz:AddToggle('NoSeatsToggle', {
+    Text = 'No-Seats',
+    Default = false,
+    Tooltip = 'Makes it so you cant sit down on anything',
+    Callback = function(value)
+        print('[cb] No-Seats Toggle changed to:', value)
+        for seat, _ in pairs(cachedSeats) do
+            if seat and seat:IsA("Seat") then
+                seat.Disabled = value -- Update seat state
+                if value then
+                    CollectionService:AddTag(seat, "Seat")
+                else
+                    CollectionService:RemoveTag(seat, "Seat")
+                end
+            end
+        end
+    end
+})
+
+-- Auto Drop Cash Toggle (Unique Identifier)
+stutz:AddToggle('AutoDropCashToggle', {
+    Text = 'Auto Drop Cash',
+    Default = false,
+    Tooltip = 'Automatically drops cash',
+    Callback = function(Value)
+        -- Locals
+        local Player = game:GetService("Players").LocalPlayer
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local RunService = game:GetService("RunService")
+        local MainScreenGui = Player.PlayerGui.MainScreenGui
+        local MoneyText = MainScreenGui.MoneyText
+
+        -- Global variable to track Money Drop state
+        getgenv().moneyDropEnabled = getgenv().moneyDropEnabled or false -- Initialize as false if not already set
+
+        -- Function to safely extract the money amount from the text
+        local function getMoneyAmount()
+            local moneyText = MoneyText.Text:match("%$(%d[%,%d]*)")  -- Extract the money amount after "$"
+            if moneyText then
+                local cleanedMoneyString = moneyText:gsub(",", "")  -- Remove commas
+                local amount = tonumber(cleanedMoneyString)  -- Convert to number
+                return amount or 0  -- If the conversion fails, return 0
+            else
+                return 0
+            end
+        end
+
+        -- Function to drop money
+        local function dropMoney(amountToDrop)
+            if amountToDrop > 0 then
+                ReplicatedStorage.MainEvent:FireServer("DropMoney", tostring(amountToDrop))  -- Convert amount to string
+            end
+        end
+
+        -- Function to enable or disable the money drop
+        local function toggleMoneyDrop()
+            getgenv().moneyDropEnabled = not getgenv().moneyDropEnabled -- Toggle the state
+        end
+
+        -- Main loop (this will stop doing anything when moneyDropEnabled is false)
+        RunService.Heartbeat:Connect(function()
+            if getgenv().moneyDropEnabled then
+                local money = getMoneyAmount()  -- Get the current money amount
+                dropMoney(money < 15000 and money or 15000)  -- Drop all money if under 15,000, or drop 15,000
+            end
+        end)
+
+        -- Call this function to toggle the money drop
+        toggleMoneyDrop()  -- Toggle the money drop (enable or disable)
+    end
+})
+
+-- Auto-Reload and Silent-Reload toggles
+stutz:AddToggle('AutoReloadToggle', {
+    Text = 'Auto-Reload',
+    Default = false, -- Default value (true / false)
+    Tooltip = 'Reloads Automatically when 0 ammo',
+    Callback = function(Value)
+        _G.AutoReload = Value -- Set AutoReload based on the toggle state
+    end
+})
+
+stutz:AddToggle('SilentReloadToggle', {
+    Text = 'Silent-Reload',
+    Default = false, -- Default value (true / false)
+    Tooltip = 'Reloads Silently',
+    Callback = function(Value)
+        -- Apply the Silent Reload setup each time the toggle is changed
+        setupSilentReload(Value)
+
+        -- If the player dies and respawns, reset Silent Reload setup
+        LocalPlayer.CharacterAdded:Connect(function()
+            setupSilentReload(Value)
+        end)
+    end
+})
+
+-- Anti-void Toggle (Unique Identifier)
+local antiVoidEnabled = false
+stutz:AddToggle('AntiVoidToggle', {
+    Text = 'Anti-Void',
+    Default = false,
+    Tooltip = 'Prevents falling into the void by teleporting up',
+    Callback = function(Value)
+        antiVoidEnabled = Value
+        print('[cb] AntiVoidToggle changed to:', Value)
+    end
+})
+
+-- Anti-void check function
+local function antiVoidCheck()
+    local player = game:GetService("Players").LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local rootPart = character:WaitForChild("HumanoidRootPart")
+    
+    if antiVoidEnabled and rootPart and rootPart.Position.Y <= -150 then
+        rootPart.CFrame = rootPart.CFrame + Vector3.new(0, 500, 0)
+    end
+end
+
+RunService.Heartbeat:Connect(antiVoidCheck)
+
+-- Ensure auto reload is functioning right from the start if enabled
+RunService.Heartbeat:Connect(function()
+    if _G.AutoReload then
+        handleAutoReload()
+    end
+end)
+
+local RunService = game:GetService("RunService")
+local player = game.Players.LocalPlayer
+local debris = game:GetService("Debris")  -- For cleanup
+
+-- Assuming LeftGroupBox and other UI elements are set up previously
+local antiStompEnabled = false  -- Default value for anti-stomp toggle
+
+-- Cache Enum values that are used frequently
+local HumanoidStateType = Enum.HumanoidStateType
+local KOD = "K.O"
+local GRABBING_CONSTRAINT = "GRABBING_CONSTRAINT"
+
+stutz:AddToggle('MyToggle', {
+    Text = 'Anti Stomp',
+    Default = false, -- Default value (true / false)
+    Tooltip = 'Destroys character when knocked preventing stomps',
+    
+    Callback = function(Value)
+        antiStompEnabled = Value  -- Update the toggle value
+    end
+})
+
+-- RunService heartbeat to monitor character state
+RunService.Heartbeat:Connect(function()
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+    -- Check if the character and humanoid exist
+    if character and humanoid then
+        -- Use a variable for BodyEffects and K.O state to avoid repeated calls
+        local bodyEffects = character:FindFirstChild("BodyEffects")
+        local KOd = bodyEffects and bodyEffects[KOD] and bodyEffects[KOD].Value
+        local Grabbed = character:FindFirstChild(GRABBING_CONSTRAINT) ~= nil
+
+        -- Only execute if Anti Stomp is enabled
+        if antiStompEnabled and (KOd or Grabbed) then
+            -- Prevent interaction by disabling humanoid interactions
+            humanoid.PlatformStand = true  -- Disable normal character movements
+            humanoid.WalkSpeed = 0  -- Prevent walking
+            humanoid.JumpHeight = 0  -- Prevent jumping
+            humanoid.Health = 0  -- Force kill the character immediately
+
+            -- Disable collision to make it untouchable by other players
+            for _, part in pairs(character:GetChildren()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false  -- Disable collision with other players
+                end
+            end
+
+            -- Disable unnecessary humanoid states
+            humanoid:SetStateEnabled(HumanoidStateType.Physics, false)
+            humanoid:SetStateEnabled(HumanoidStateType.Seated, false)
+            humanoid:SetStateEnabled(HumanoidStateType.Climbing, false)
+            humanoid:SetStateEnabled(HumanoidStateType.Freefall, false)
+            humanoid:SetStateEnabled(HumanoidStateType.Ragdoll, false)
+
+            -- Prevent health changes from other players
+            humanoid.MaxHealth = humanoid.Health
+
+            -- Clean up BodyEffects to remove any effects causing interaction
+            if bodyEffects then
+                bodyEffects:ClearAllChildren()
+            end
+
+            -- Prevent stomping or any other interaction from players
+            local collisionParts = character:GetChildren()
+            for _, part in pairs(collisionParts) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false  -- Fully prevent collision interactions
+                end
+            end
+
+            -- Immediately reset the character to remove any potential interaction
+            player:LoadCharacter()  -- Reload the character to reset the player
+        end
+    end
+end)
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer  -- Store the LocalPlayer
+
+-- Base URL for the animation assets
+local animationBaseUrl = "http://www.roblox.com/asset/?id="
+
+-- Table of animations with optimized base URL usage
+local animations = {
+    R15 = {
+        idle = animationBaseUrl .. "2510196951",
+        walk = animationBaseUrl .. "2510202577",
+        run = animationBaseUrl .. "2510198475",
+        jump = animationBaseUrl .. "2510197830",
+        climb = animationBaseUrl .. "2510192778",
+        fall = animationBaseUrl .. "2510195892",
+    },
+    Loser = {
+        idle = animationBaseUrl .. "782841498",
+        walk = animationBaseUrl .. "616168032",
+        run = animationBaseUrl .. "616163682",
+        jump = animationBaseUrl .. "1083218792",
+        climb = animationBaseUrl .. "1083439238",
+        fall = animationBaseUrl .. "707829716",
+    },
+     Levitation = {
+        idle = animationBaseUrl .. "616006778",
+        jump = animationBaseUrl .. "616008936",
+        fall = animationBaseUrl .. "616005863",
+        walk = animationBaseUrl .. "616013216",
+        run = animationBaseUrl .. "616010382",
+        climb = animationBaseUrl .. "616003713",
+    },
+    Mage = {
+        idle = animationBaseUrl .. "707742142",
+        jump = animationBaseUrl .. "707853694",
+        fall = animationBaseUrl .. "707829716",
+        walk = animationBaseUrl .. "707897309",
+        run = animationBaseUrl .. "707861613",
+        climb = animationBaseUrl .. "707826056",
+    },
+    Ninja = {
+        idle = animationBaseUrl .. "656117400",
+        jump = animationBaseUrl .. "656117878",
+        fall = animationBaseUrl .. "656115606",
+        walk = animationBaseUrl .. "656121766",
+        run = animationBaseUrl .. "656118852",
+        climb = animationBaseUrl .. "656114359",
+    },
+    Stylish = {
+        idle = animationBaseUrl .. "616136790",
+        jump = animationBaseUrl .. "616139451",
+        fall = animationBaseUrl .. "616134815",
+        walk = animationBaseUrl .. "616146177",
+        run = animationBaseUrl .. "616140816",
+        climb = animationBaseUrl .. "616133594",
+    },
+    Superhero = {
+        idle = animationBaseUrl .. "616111295",
+        jump = animationBaseUrl .. "616115533",
+        fall = animationBaseUrl .. "616108001",
+        walk = animationBaseUrl .. "616122287",
+        run = animationBaseUrl .. "616117076",
+        climb = animationBaseUrl .. "616104706",
+    },
+    Toy = {
+        idle = animationBaseUrl .. "782841498",
+        jump = animationBaseUrl .. "782847020",
+        fall = animationBaseUrl .. "782846423",
+        walk = animationBaseUrl .. "782843345",
+        run = animationBaseUrl .. "782842708",
+        climb = animationBaseUrl .. "782843869",
+    },
+    Vampire = {
+        idle = animationBaseUrl .. "1083445855",
+        jump = animationBaseUrl .. "1083455352",
+        fall = animationBaseUrl .. "1083443587",
+        walk = animationBaseUrl .. "1083473930",
+        run = animationBaseUrl .. "1083462077",
+        climb = animationBaseUrl .. "1083439238",
+    },
+    Werewolf = {
+        idle = animationBaseUrl .. "1083195517",
+        jump = animationBaseUrl .. "1083218792",
+        fall = animationBaseUrl .. "1083189019",
+        walk = animationBaseUrl .. "1083178339",
+        run = animationBaseUrl .. "1083216690",
+        climb = animationBaseUrl .. "1083182000",
+    },
+    Zombie = {
+        idle = animationBaseUrl .. "616158929",
+        jump = animationBaseUrl .. "616161997",
+        fall = animationBaseUrl .. "616157476",
+        walk = animationBaseUrl .. "616168032",
+        run = animationBaseUrl .. "616163682",
+        climb = animationBaseUrl .. "616156119",
+    },
+}
+
+-- Function to apply animations based on the selected preset
+local function applyAnimations(animate, preset)
+    -- Ensure the animation IDs are applied correctly
+    if animate and preset then
+        if animate.idle and animate.idle:FindFirstChild("Animation1") then
+            animate.idle.Animation1.AnimationId = preset.idle
+        else
+            warn("Idle animation or Animation1 not found")
+        end
+        
+        if animate.walk and animate.walk:FindFirstChild("WalkAnim") then
+            animate.walk.WalkAnim.AnimationId = preset.walk
+        else
+            warn("Walk animation or WalkAnim not found")
+        end
+
+        if animate.run and animate.run:FindFirstChild("RunAnim") then
+            animate.run.RunAnim.AnimationId = preset.run
+        else
+            warn("Run animation or RunAnim not found")
+        end
+
+        if animate.jump and animate.jump:FindFirstChild("JumpAnim") then
+            animate.jump.JumpAnim.AnimationId = preset.jump
+        else
+            warn("Jump animation or JumpAnim not found")
+        end
+
+        if animate.climb and animate.climb:FindFirstChild("ClimbAnim") then
+            animate.climb.ClimbAnim.AnimationId = preset.climb
+        else
+            warn("Climb animation or ClimbAnim not found")
+        end
+
+        if animate.fall and animate.fall:FindFirstChild("FallAnim") then
+            animate.fall.FallAnim.AnimationId = preset.fall
+        else
+            warn("Fall animation or FallAnim not found")
+        end
+    end
+end
+
+-- Function to apply the selected animation preset to the player's character
+local function applySelectedAnimations(character)
+    -- Ensure the character has the Animate object
+    local animate = character:FindFirstChild("Animate")
+    if animate then
+        local selectedPreset = animations[currentAnimationPreset]  -- Use the preset based on the dropdown
+        applyAnimations(animate, selectedPreset)
+    end
+end
+
+-- Initialize the GroupBox and Dropdown for selecting animation presets
+local LeftGroupBox = Tabs.Player:AddLeftGroupbox('Player Animations')
+
+-- Dropdown to choose which animation preset to apply
+LeftGroupBox:AddDropdown('AnimationSelector', {
+    Values = {'R15', 'Loser', 'Levitation', 'Mage', 'Ninja', 'Stylish', 'Superhero', 'Toy', 'Vampire', 'Werewolf', 'Zombie',},
+    Default = 1, -- Default option (R15)
+    Multi = false, -- Allow single selection only
+
+    Text = 'Select Animation',
+    Tooltip = 'Choose the animation you want to apply',
+
+    Callback = function(Value)
+        currentAnimationPreset = Value  -- Update the preset based on the dropdown selection
+    end
+})
+
+game:GetService("RunService").Heartbeat:Connect(function()
+    if player.Character then
+        applySelectedAnimations(player.Character)  -- Apply the selected animation
+    end
+end)
+
+DesyncBox = Tabs.Player:AddRightGroupbox("Player Desync")
+
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = game:GetService("Players").LocalPlayer
+
+desync_setback = Instance.new("Part")
+desync_setback.Name = "Desync Setback"
+desync_setback.Parent = workspace
+desync_setback.Size = Vector3.new(2, 2, 1)
+desync_setback.CanCollide = false
+desync_setback.Anchored = true
+desync_setback.Transparency = 1
+
+desync = {
+    enabled = false,
+    mode = "Void",
+    teleportPosition = Vector3.new(0, 0, 0),
+    old_position = nil,
+    voidSpamActive = false,
+    toggleEnabled = false
+}
+
+function resetCamera()
+    if LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if humanoid then
+            workspace.CurrentCamera.CameraSubject = humanoid
+        end
+    end
+end
+
+function toggleDesync(state)
+    desync.enabled = state
+    if desync.enabled then
+        workspace.CurrentCamera.CameraSubject = desync_setback
+        Library:Notify("Desync Enabled '" .. desync.mode .. "' Vilant Exploit V2", 2)
+    else
+        resetCamera()
+        Library:Notify("Desync Disabled '" .. desync.mode .. "' Vilant Exploit V2", 2)
+    end
+end
+
+function setDesyncMode(mode)
+    desync.mode = mode
+end
+
+DesyncBox:AddToggle('DesyncToggle', {
+    Text = 'Desync',
+    Default = false,
+    Callback = function(state)
+        desync.toggleEnabled = state
+        if not state then
+            toggleDesync(false)
+        end
+    end,
+}):AddKeyPicker('DesyncKeybind', {
+    Default = 'V',
+    Text = 'Keybind',
+    Mode = 'Toggle',
+    Callback = function(state)
+        if not desync.toggleEnabled or UserInputService:GetFocusedTextBox() then return end
+        toggleDesync(not desync.enabled)
+    end,
+})
+
+DesyncBox:AddDropdown('DesyncMethodDropdown', {
+    Values = {"Destroy Cheaters", "Underground", "Void Spam", "Void"},
+    Default = "Void",
+    Multi = false,
+    Text = 'Method',
+    Callback = function(selected)
+        setDesyncMode(selected)
+    end
+})
+
+RunService.Heartbeat:Connect(function()
+    if desync.enabled and LocalPlayer.Character then
+        local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            desync.old_position = rootPart.CFrame
+
+            if desync.mode == "Destroy Cheaters" then
+                desync.teleportPosition = Vector3.new(11223344556677889900, 1, 1)
+
+            elseif desync.mode == "Underground" then
+                desync.teleportPosition = rootPart.Position - Vector3.new(0, 12, 0)
+
+            elseif desync.mode == "Void Spam" then
+                desync.teleportPosition = math.random(1, 2) == 1 and desync.old_position.Position or Vector3.new(
+                    math.random(10000, 50000),
+                    math.random(10000, 50000),
+                    math.random(10000, 50000)
+                )
+
+            elseif desync.mode == "Void" then
+                desync.teleportPosition = Vector3.new(
+                    rootPart.Position.X + math.random(-444444, 444444),
+                    rootPart.Position.Y + math.random(-444444, 444444),
+                    rootPart.Position.Z + math.random(-44444, 44444)
+                )
+            end
+
+            if desync.mode ~= "Rotation" then
+                rootPart.CFrame = CFrame.new(desync.teleportPosition)
+                workspace.CurrentCamera.CameraSubject = desync_setback
+
+                RunService.RenderStepped:Wait()
+
+                desync_setback.CFrame = desync.old_position * CFrame.new(0, rootPart.Size.Y / 2 + 0.5, 0)
+                rootPart.CFrame = desync.old_position
+            end
+        end
+    end
+end)
+
+RightGroupBox = Tabs.Player:AddRightGroupbox('Staff Checker')
+
+if _G.staffCheckerEnabled == nil then
+    _G.staffCheckerEnabled = false -- Default value
+end
+
+RightGroupBox:AddToggle('MyToggle', {
+    Text = 'Anti-Staff',
+    Default = _G.staffCheckerEnabled,
+    Tooltip = 'Enables real-time staff detection',
+
+    Callback = function(Value)
+        _G.staffCheckerEnabled = Value
+        if Value then
+            enableStaffChecker()
+        else
+            disableStaffChecker()
+        end
+        print('[Staff Checker] Toggled:', Value)
+    end
+})
+
+-- Define Services properly
+local Services = {
+    Players = game:GetService("Players"),
+    LocalPlayer = game.Players.LocalPlayer,
+}
+
+getgenv().PlayerInfo = Tabs.Player:AddRightGroupbox('Player Misc')
+
+-- View Toggle
+PlayerInfo:AddToggle('view', {
+    Text = 'Spectate',
+    Default = false,
+    Callback = function(state)
+        if state and getgenv().SelectedTarget then
+            local targetPlayer = Services.Players:FindFirstChild(getgenv().SelectedTarget)
+            if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("Humanoid") then
+                workspace.CurrentCamera.CameraSubject = targetPlayer.Character.Humanoid
+            end
+        else
+            if Services.LocalPlayer.Character and Services.LocalPlayer.Character:FindFirstChild("Humanoid") then
+                workspace.CurrentCamera.CameraSubject = Services.LocalPlayer.Character.Humanoid
+            end
+        end
+    end,
+})
+
+-- Teleport Button (Safe Teleportation)
+PlayerInfo:AddButton('Teleport', function()
+    local targetPlayer = Services.Players:FindFirstChild(getgenv().SelectedTarget)
+    if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local targetCFrame = targetPlayer.Character.HumanoidRootPart.CFrame
+        -- Safe teleportation (Make sure it's safe before teleporting)
+        if targetCFrame then
+            Services.LocalPlayer.Character.HumanoidRootPart.CFrame = targetCFrame
+        end
+    end
+end)
+
+-- Player Selection Dropdown
+getgenv().TargetDropdown = PlayerInfo:AddDropdown('yepyep', {
+    SpecialType = 'Player',
+    Text = 'Select a Player',
+    Tooltip = 'Select a player to perform actions on.',
+    Callback = function(value)
+        getgenv().SelectedTarget = value
+    end,
+})
+
+RightGroupBox = Tabs.Player:AddRightGroupbox('Teleports')
+
+MyButton = RightGroupBox:AddButton({
+    Text = 'Bank',
+    Func = function()
+        teleportCFrame = CFrame.new(-442, 39, -284)  -- Change this to your desired coordinates
+        game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(teleportCFrame)
+    end,
+    DoubleClick = false,
+    Tooltip = 'Teleports you to the Bank'
+})
+
+MyButton = RightGroupBox:AddButton({
+    Text = 'Inside Bank',
+    Func = function()
+        teleportCFrame = CFrame.new(-443, 23, -284)  -- Change this to your desired coordinates
+        game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(teleportCFrame)
+    end,
+    DoubleClick = false,
+    Tooltip = 'Teleports you to the Bank'
+})
+
+
+MyButton = RightGroupBox:AddButton({
+    Text = 'Vault',
+    Func = function()
+        teleportCFrame = CFrame.new(-658, -30, -285)  -- Change this to your desired coordinates
+        game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(teleportCFrame)
+    end,
+    DoubleClick = false,
+    Tooltip = 'Teleports you to the Bank'
+})
+
+MyButton = RightGroupBox:AddButton({
+    Text = 'Revolver',
+    Func = function()
+        teleportCFrame = CFrame.new(-634, 21, -132)  -- Change this to your desired coordinates
+        game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(teleportCFrame)
+    end,
+    DoubleClick = false,
+    Tooltip = 'Teleports you to the Bank'
+})
+
+MyButton = RightGroupBox:AddButton({
+    Text = 'LMG',
+    Func = function()
+        teleportCFrame = CFrame.new(-626, 23, -295)  -- Change this to your desired coordinates
+        game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(teleportCFrame)
+    end,
+    DoubleClick = false,
+    Tooltip = 'Teleports you to the Bank'
+})
+
+MyButton = RightGroupBox:AddButton({
+    Text = 'DownHill',
+    Func = function()
+        teleportCFrame = CFrame.new(-559, 8, -735)  -- Change this to your desired coordinates
+        game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(teleportCFrame)
+    end,
+    DoubleClick = false,
+    Tooltip = 'Teleports you to the Bank'
+})
+
+MyButton = RightGroupBox:AddButton({
+    Text = 'Military Base',
+    Func = function()
+        teleportCFrame = CFrame.new(-40, 65, -926)  -- Change this to your desired coordinates
+        game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(teleportCFrame)
+    end,
+    DoubleClick = false,
+    Tooltip = 'Teleports you to the Bank'
+})
+
+MyButton = RightGroupBox:AddButton({
+    Text = 'Uphill',
+    Func = function()
+        teleportCFrame = CFrame.new(481, 48, -602)  -- Change this to your desired coordinates
+        game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(teleportCFrame)
+    end,
+    DoubleClick = false,
+    Tooltip = 'Teleports you to the Bank'
+})
+
+MyButton = RightGroupBox:AddButton({
+    Text = 'Police Station',
+    Func = function()
+        teleportCFrame = CFrame.new(-264, 21, -93)  -- Change this to your desired coordinates
+        game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(teleportCFrame)
+    end,
+    DoubleClick = false,
+    Tooltip = 'Teleports you to the Bank'
+})
+
+MyButton = RightGroupBox:AddButton({
+    Text = 'School',
+    Func = function()
+        teleportCFrame = CFrame.new(-594, 21, 173)  -- Change this to your desired coordinates
+        game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(teleportCFrame)
+    end,
+    DoubleClick = false,
+    Tooltip = 'Teleports you to the Bank'
+})
+
+local MenuGroup = Tabs['Visuals']:AddLeftGroupbox('')
+
+MenuGroup:AddButton('Unload', function() Library:Unload() end)
+
+Library:SetWatermarkVisibility(true)
+
+local FrameTimer = tick()
+local FrameCounter = 0;
+local FPS = 60;
+
+local WatermarkConnection = game:GetService('RunService').RenderStepped:Connect(function()
+    FrameCounter += 1;
+
+    if (tick() - FrameTimer) >= 1 then
+        FPS = FrameCounter;
+        FrameTimer = tick();
+        FrameCounter = 0;
+    end;
+
+    Library:SetWatermark(('Vilant Exploit V2 | %s fps | %s ms'):format(
+        math.floor(FPS),
+        math.floor(game:GetService('Stats').Network.ServerStatsItem['Data Ping']:GetValue())
+    ));
+end);
