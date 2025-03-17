@@ -1,0 +1,16 @@
+local player = game.Players.LocalPlayer
+local WhitelistedUserIds = {
+    2788229376,
+}
+
+local isWhitelisted = false
+for _, userId in ipairs(WhitelistedUserIds) do
+    if player.UserId == userId then
+        isWhitelisted = true
+        break
+    end
+end
+
+if not isWhitelisted then
+    player:Kick("Vilant Exploit V2 | Not whitelisted")
+end
