@@ -4,6 +4,7 @@ local WhitelistedUserIds = {
     5517261209,
     3175992279,
     2762262873,
+    8018298657,
 }
 
 local isWhitelisted = false
