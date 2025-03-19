@@ -1,5 +1,6 @@
 local player = game.Players.LocalPlayer
 local WhitelistedUserIds = {
+    664477643,
     5222608451,
 }
 
