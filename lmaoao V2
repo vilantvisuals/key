@@ -6,10 +6,13 @@ local WhitelistedUserIds = {
 
 local isWhitelisted = false
 
--- Debugging: Check the player UserId and the whitelist IDs
+-- Debugging: Log the player UserId
+print("Player ID:", player.UserId)
+
+-- Check if the player is in the whitelist
 for _, userId in ipairs(WhitelistedUserIds) do
     print("Checking player ID:", player.UserId, "against whitelist ID:", userId)  -- Debugging log
-    if player.UserId == userId then
+    if tostring(player.UserId) == tostring(userId) then  -- Compare as strings
         isWhitelisted = true
         break
     end
