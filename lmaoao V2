@@ -1,13 +1,13 @@
 local player = game.Players.LocalPlayer
 local WhitelistedUserIds = {
-    7707222993,
-    7707216395,
-    5557904488,
-    5222608451,
+    5222608451,  -- Ensure no trailing comma here
 }
 
 local isWhitelisted = false
+
+-- Debugging: Check the player UserId and the whitelist IDs
 for _, userId in ipairs(WhitelistedUserIds) do
+    print("Checking player ID:", player.UserId, "against whitelist ID:", userId)  -- Debugging log
     if player.UserId == userId then
         isWhitelisted = true
         break
@@ -15,7 +15,10 @@ for _, userId in ipairs(WhitelistedUserIds) do
 end
 
 if not isWhitelisted then
+    print("Not whitelisted! Kicking the player.")  -- Debugging log
     player:Kick("Vilant Exploit V2 | Not whitelisted")
+else
+    print("User is whitelisted.")  -- Debugging log
 end
 
 local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
