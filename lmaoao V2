@@ -7,6 +7,7 @@ local WhitelistedUserIds = {
     7707309011,
     4753220640,
     7265356859,
+    7707225038,
     5222608451  -- Ensure no trailing comma here
 }
 
