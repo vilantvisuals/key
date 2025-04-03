@@ -1,36 +1,3 @@
-local player = game.Players.LocalPlayer
-local WhitelistedUserIds = {
-    7707216395,
-    3161405902,
-    4478717929,
-    5557904488,
-    7707309011,
-    4753220640,
-    7265356859,
-    7707225038,
-    5222608451  -- Ensure no trailing comma here
-}
-
-local isWhitelisted = false
-
--- Debugging: Log the player UserId
-print("Player ID:", player.UserId)
-
--- Check if the player is in the whitelist
-for _, userId in ipairs(WhitelistedUserIds) do
-    print("Checking player ID:", player.UserId, "against whitelist ID:", userId)  -- Debugging log
-    if tostring(player.UserId) == tostring(userId) then  -- Compare as strings
-        isWhitelisted = true
-        break
-    end
-end
-
-if not isWhitelisted then
-    print("Not whitelisted! Kicking the player.")  -- Debugging log
-    player:Kick("Vilant Exploit V2 | Not whitelisted")
-else
-    print("User is whitelisted.")  -- Debugging log
-end
 
 local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
 local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
