@@ -12,5 +12,5 @@ for _, userId in ipairs(WhitelistedUserIds) do
 end
 
 if not isWhitelisted then
-    player:Kick("Vilant Exploit V2 | Not whitelisted")
+    player:Kick("Not whitelisted")
 end
